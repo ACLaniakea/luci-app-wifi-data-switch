@@ -1,0 +1,20 @@
+{
+  "luci-app-wifi-data-switch": {
+    "description": "Manage Wi-Fi and mobile uplinks without exposing saved passwords",
+    "read": {
+      "ubus": {
+        "wifi-data-switch": [
+          "status",
+          "scan"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "wifi-data-switch": [
+          "configure"
+        ]
+      }
+    }
+  }
+}

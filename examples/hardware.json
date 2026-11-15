@@ -1,0 +1,12 @@
+{
+  "wifi_network": "wwan",
+  "mobile_network": "wan",
+  "lan_network": "lan",
+  "wifi_device": "wlan-sta",
+  "mobile_device": "sipa_eth0",
+  "lan_device": "br-lan",
+  "radio": "radio0",
+  "station": "uplink",
+  "clash_mark": "0x162",
+  "restart_services": []
+}

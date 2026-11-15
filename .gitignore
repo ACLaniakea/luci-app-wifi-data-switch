@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.runtime/
+dist/
+*.ipk
+*.apk
+*.tar.gz
+*.zip
+.env
+.env.*
+settings.json
+credentials.json
+clash-before-binding.yaml
+*.pcap
+*.etl
