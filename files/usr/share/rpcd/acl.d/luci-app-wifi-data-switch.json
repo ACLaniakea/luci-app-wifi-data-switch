@@ -12,7 +12,7 @@
     "write": {
       "ubus": {
         "wifi-data-switch": [
-          "configure"
+          "configure", "apply"
         ]
       }
     }

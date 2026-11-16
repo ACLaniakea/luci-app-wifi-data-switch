@@ -171,7 +171,9 @@ def bind_clash(device):
         return False
 def status():
     s=read(RUN/'status.json',{'ready':False,'direct':'mobile','proxy':'mobile'});cfg=config();hw=hardware()
-    s['settings']={k:v for k,v in cfg.items() if k not in ('password','wifi_key')}
+    pending=read(ROOT/'pending.json',None)
+    s['pending']=pending is not None
+    s['settings']={k:v for k,v in (pending if pending is not None else cfg).items() if k not in ('password','wifi_key')}
     wifi=iface(hw['wifi_network']);s['wifi']=wifi;s['mobile']=iface(hw['mobile_network'])
     try:
         link=command(['iw','dev',hw['wifi_device'],'link'],check=False,timeout=3).stdout
@@ -187,7 +189,7 @@ def status():
     s['boost']=read(RUN/'boost.json',{'active':False})
     s['last_switch']=read(RUN/'last-switch.json',{})
     return s
-def configure(args):
+def configure(args,apply=False):
     hw=hardware();station='wireless.'+hw['station'];radio='wireless.'+hw['radio']
     cfg=config();mode=args.get('mode',cfg['mode']);ssid=args.get('ssid',cfg['ssid']);enc=args.get('encryption',cfg['encryption']);band=args.get('band',cfg.get('band','5g'))
     if mode not in ('split','mobile','wifi') or enc not in ('none','psk2','sae','sae-mixed'):raise ValueError('无效模式或加密方式。')
@@ -197,6 +199,11 @@ def configure(args):
     if not isinstance(key,str) or any(c in key for c in ('\n','\r','\x00')):raise ValueError('Wi-Fi 密码不能包含换行或空字符。')
     if key and not(8<=len(key)<=63 or len(key)==64 and re.fullmatch('[0-9a-fA-F]+',key)):raise ValueError('Wi-Fi 密码长度不正确。')
     boost=acceleration(args);boost.update(quota.limits(args))
+    if not apply:
+        draft={**cfg,**args,**boost}
+        draft['failover']=str(args.get('failover',cfg.get('failover',True))).lower() in ('true','1','yes','on')
+        write(ROOT/'pending.json',draft)
+        return {'ok':True,'message':'已保存，尚未生效。点击应用已保存设置后生效。'}
     oldssid=command(['uci','-q','get',station+'.ssid'],check=False).stdout.strip();oldenc=command(['uci','-q','get',station+'.encryption'],check=False).stdout.strip()
     if enc!='none' and not key and not command(['uci','-q','get',station+'.key'],check=False).stdout.strip():raise ValueError('请填写无线密码。')
     oldband=command(['uci','-q','get',radio+'.band'],check=False).stdout.strip()
@@ -275,7 +282,7 @@ def daemon():
         command(['nft','delete','table','inet','wifi_data_switch'],check=False)
         # Keep explicit bound-uplink routes for already established sockets.
         write(RUN/'status.json',{'ready':False,'direct':'mobile','proxy':'mobile','wifi_direct':False})
-METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String'},'scan':{}}
+METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String'},'scan':{},'apply':{}}
 def main():
     ensure_dirs()
     if len(sys.argv)>1 and sys.argv[1]=='daemon':daemon();return
@@ -284,6 +291,12 @@ def main():
     args=json.load(sys.stdin) if method not in ('status',) else {}
     if method=='status':result=status()
     elif method=='configure':result=configure(args)
+    elif method=='apply':
+        draft=read(ROOT/'pending.json',None)
+        if draft is None:result={'ok':True,'message':'没有待应用的设置。'}
+        else:
+            result=configure(draft,apply=True)
+            (ROOT/'pending.json').unlink(missing_ok=True)
     elif method=='scan':
         result=json.loads(command(['ubus','call','iwinfo','scan',json.dumps({'device':hardware()['wifi_device']})],timeout=20).stdout)
     else:raise ValueError('Unknown method')

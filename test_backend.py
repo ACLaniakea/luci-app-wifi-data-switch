@@ -21,10 +21,20 @@ spec.loader.exec_module(maintenance)
 
 class BackendTest(unittest.TestCase):
     def test_public_rpc_surface_has_no_portal_actions(self):
-        self.assertEqual(set(controller.METHODS), {'status', 'scan', 'configure'})
+        self.assertEqual(set(controller.METHODS), {'status', 'scan', 'configure', 'apply'})
         acl = json.loads((BASE.parents[1] / 'share/rpcd/acl.d/luci-app-wifi-data-switch.json').read_text())
         entry = acl['luci-app-wifi-data-switch']
-        self.assertEqual(entry['write']['ubus']['wifi-data-switch'], ['configure'])
+        self.assertEqual(entry['write']['ubus']['wifi-data-switch'], ['configure', 'apply'])
+
+    def test_save_stages_without_changing_network(self):
+        cfg={'mode':'split','ssid':'Example','encryption':'none','failover':True}
+        with mock.patch.object(controller,'config',return_value=cfg), mock.patch.object(controller,'command') as command, mock.patch.object(controller,'write') as write:
+            result=controller.configure({'daily_mib':'1536'})
+        self.assertTrue(result['ok'])
+        command.assert_not_called()
+        self.assertEqual(write.call_args.args[0].name,'pending.json')
+        self.assertEqual(write.call_args.args[1]['daily_mib'],1536)
+        self.assertNotIn('daily_mib',cfg)
 
     def test_lan_routes_follow_configured_lan(self):
         calls = []

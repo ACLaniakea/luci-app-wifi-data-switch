@@ -6,7 +6,7 @@
 
 var api = {};
 [['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains', 'daily_mib', 'monthly_mib', 'billing_day']],
- ['scan', []]].forEach(function(entry) {
+ ['scan', []], ['apply', []]].forEach(function(entry) {
     api[entry[0]] = rpc.declare({ object: 'wifi-data-switch', method: entry[0], params: entry[1], expect: {} });
 });
 function notify(result) {
@@ -70,7 +70,8 @@ return view.extend({
             var normalProxy = savedMode === 'wifi' ? 'wifi' : 'mobile';
             var fallback = s.ready && (s.direct !== normalDirect || s.proxy !== normalProxy);
             var switchedAt = s.last_switch && s.last_switch.time ? new Date(s.last_switch.time * 1000).toLocaleString() : '尚无记录';
-            summary.replaceChildren(E('p', {}, ['当前模式：' + (modes[savedMode] || '初始化中')]),
+            summary.replaceChildren(E('p', {}, [s.pending ? '有已保存但未应用的设置。' : '当前设置已应用。']),
+                E('p', {}, ['当前模式：' + (modes[savedMode] || '初始化中')]),
                 E('p', {}, [E('strong', {}, ['直连 → ' + routeLabel(s.direct)]), '　　', E('strong', {}, ['OpenClash 代理 → ' + routeLabel(s.proxy)])]),
                 E('p', {}, [s.ready ? (s.clash_bound ? (fallback ? '当前正在使用备用出口；原出口恢复后自动回切。' : '分流规则已就绪，正在自动监测两条出口。') : '正在准备 OpenClash 绑定；暂由移动数据保持连接。') : '监测服务正在启动或已停止。']),
                 E('p', {}, ['最近出口变化：' + switchedAt]),
@@ -137,10 +138,24 @@ return view.extend({
             row('自动故障转移', failover, '任一出口不可用时使用另一条；原出口连续检测恢复后自动回切。'),
             row('无线名称（SSID）', ssid), row('无线频段', band), row('无线加密', encryption), row('无线密码', key),
             row('网络扫描', E('div', {}, [scanButton, scanResult])),
-            button('保存并应用', function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value)).then(function(r) { if (r.ok) key.value = '';notify(r); }); }, true)]);
+            E('p', {}, ['保存只记录设置；应用后才修改当前网络。'])]);
+        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value)).then(function(r) { if (r.ok) key.value = '';notify(r); }); };
+        function actions() { return E('div', { style: 'margin:12px 0' }, [button('保存设置', saveSettings, true), button('应用已保存设置', function() { return api.apply().then(notify); }, false)]); }
+        quotaPanel.appendChild(actions());
+        accelerationPanel.appendChild(actions());
+        settings.appendChild(actions());
 
+        var noticeText = '请关闭 F50 发出的 Wi-Fi 热点，使用有线连接。保留 F50 连接其他 Wi-Fi 的功能，不要关闭整个 Wi-Fi。';
+        var noticeKey = 'wifi-data-switch-f50-notice-v1';
+        var acknowledged = false;
+        try { acknowledged = localStorage.getItem(noticeKey) === 'yes'; } catch (_) {}
+        if (!acknowledged && ui.showModal) {
+            ui.showModal('使用前请确认', [E('p', {}, ['本插件为 F50 设计，目前仅在 F50 上测试。其他设备暂未验证。']), E('p', {}, [noticeText]),
+                button('我已确认，继续使用', function() { try { localStorage.setItem(noticeKey, 'yes'); } catch (_) {} ui.hideModal(); }, true)]);
+        }
         return E('div', {}, [E('h2', {}, ['Wi-Fi / 数据切换']),
-            E('p', {}, ['保持 Wi-Fi 与移动数据同时在线，为下层设备选择出口，并与 OpenClash 配合分流。']), cards,
+            E('p', {}, ['为 F50 设计的 Wi-Fi 与移动数据分流工具，目前仅在 F50 上测试。']),
+            E('details', {}, [E('summary', {}, ['使用前须知']), E('p', {}, [noticeText]), E('p', {}, ['其他设备暂未验证，请勿直接套用配置。'])]), cards,
             E('div', { 'class': 'cbi-section', 'style': 'padding:16px' }, [summary]), usagePanel, accelerationPanel, quotaPanel, settings]);
     }
 });

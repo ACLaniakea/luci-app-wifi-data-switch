@@ -35,7 +35,7 @@ async function test() {
   assert.equal(Number(quotaWidget.children[0].value), 1536);
   quotaWidget.children[1].value = '1024'; quotaWidget.children[1].attrs.change();
   assert.equal(Number(quotaWidget.children[0].value), 1.5);
-  const save = walk(dom).find(v => v.tag === 'button' && text(v) === '保存并应用');
+  const save = walk(dom).find(v => v.tag === 'button' && text(v) === '保存设置');
   await save.attrs.click();
   const config = calls.find(v => v[0] === 'configure');
   assert.equal(config[1][0], 'split');
