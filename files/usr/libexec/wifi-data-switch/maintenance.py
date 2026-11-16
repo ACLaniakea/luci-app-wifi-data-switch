@@ -46,6 +46,7 @@ def main():
     elif action == 'cleanup':
         subprocess.run(['/etc/init.d/wifi-data-switch', 'stop'], check=False)
         subprocess.run(['/etc/init.d/wifi-data-switch', 'disable'], check=False)
+        controller.native.Manager(controller).cleanup_bypass()
         edit_hook(remove=True)
         for priority in (10510, 10511, 10512, 10513, 10520, 10521, 31020):
             controller.rule(priority, [], False)

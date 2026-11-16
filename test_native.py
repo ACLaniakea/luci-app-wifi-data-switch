@@ -9,7 +9,7 @@ class NativeTest(unittest.TestCase):
   self.assertEqual(controller.choose_uplinks(cfg,False,True),(False,False))
   self.assertTrue(controller.boost_runtime(cfg,True,True)['active'])
  def test_rule_scope_and_connection_persistence(self):
-  cfg={'boost_device_mode':'whitelist','boost_devices':'192.0.2.2/32','boost_domains':'example.com'}
+  cfg={'boost_device_mode':'whitelist','boost_devices':'192.0.2.2/32','boost_domains':'example.com','boost_scope':'domains'}
   text=native.rules(cfg,'test-lan',True)
   self.assertIn('iifname != "test-lan" return',text)
   self.assertIn('ip saddr != @selected return',text)
@@ -18,6 +18,19 @@ class NativeTest(unittest.TestCase):
   self.assertNotIn('numgen',native.rules(cfg,'test-lan',False))
   self.assertIn('0x5753',text)
   self.assertEqual(native.dns_text(['example.com']),'nftset=/example.com/4#inet#wds_native#targets\n')
+ def test_all_tcp_works_without_dns_match(self):
+  text=native.rules({'boost_scope':'all_tcp'},'lan',True)
+  self.assertIn('meta nfproto ipv4 meta mark set numgen',text)
+  self.assertNotIn('@targets',text)
+  self.assertIn('meta l4proto != tcp return',text)
+  self.assertIn('47984-48010',text)
+ def test_split_bypass_respects_openclash_ip_exceptions(self):
+  text=native.rules({'boost_scope':'all_tcp'},'lan',True,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass'))
+  self.assertIn('ip daddr != @china_ip_route return',text)
+  self.assertIn('ip daddr @china_ip_route_pass return',text)
+  self.assertLess(text.index('ip daddr @china_ip_route_pass return'),text.index('numgen'))
+  self.assertIn('ct direction reply return',text)
+  self.assertIn('198.18.0.0/15',text)
  def test_dns_backup_restored_and_proxy_stopped_before_switch(self):
   with tempfile.TemporaryDirectory() as d:
    root=pathlib.Path(d);calls=[]

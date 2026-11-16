@@ -17,6 +17,7 @@ const state = { ready: true, mode: 'split', direct: 'wifi', proxy: 'mobile', cla
   mobile: { up: true, device: 'sipa_eth0', addresses: ['198.51.100.2'], counters: {} } };
 const calls = [], polls = [];
 const rpc = { declare(spec) { return (...args) => { calls.push([spec.method, args]); return Promise.resolve(spec.method === 'status' ? state : (spec.method === 'devices' ? {devices:[{ip:'192.0.2.2',name:'test-pc',mac:'00:11:22:33:44:55',state:'recent'}]} : { ok: true, message: 'ok' })); }; } };
+global.L = {resource:v => '/luci-static/resources/' + v};
 const source = fs.readFileSync(path.join(__dirname, 'files/www/luci-static/resources/view/wifi-data-switch/settings.js'), 'utf8');
 const page = new Function('view', 'rpc', 'poll', 'ui', 'E', source)({ extend(v) { return v; } }, rpc,
   { add(fn) { polls.push(fn); } }, { addNotification() {} }, E);
@@ -38,11 +39,23 @@ async function test() {
   assert.match(text(dom), /代理 → 移动数据/);
   assert.match(text(dom), /全部走 Wi-Fi/);
   assert.match(text(dom), /全部走移动数据/);
-  assert.equal(walk(dom).filter(v => v.tag === 'option' && text(v) === '仅双网加速（无代理）').length, 1);
+  assert.equal(walk(dom).filter(v => v.tag === 'input' && v.attrs.type === 'radio' && v.attrs.value === 'direct').length, 1);
   assert.match(text(dom), /加速移动流量/);
   assert.match(text(dom), /Wi-Fi 总用量/);
   assert.match(text(dom), /移动总用量/);
   assert.match(text(dom), /日/);
+  assert.equal(walk(dom).filter(v => v.tag === 'button' && text(v) === '保存设置').length, 1);
+  const scope = walk(dom).find(v => v.tag === 'select' && text(v).includes('全部直连 TCP'));
+  assert.equal(scope.value, 'all_tcp');
+  const domainField = walk(dom).find(v => v.attrs.class === 'wds-field' && text(v).startsWith('加速域名'));
+  assert.equal(domainField.hidden, true);
+  scope.value = 'domains'; scope.attrs.change(); assert.equal(domainField.hidden, false);
+  scope.value = 'all_tcp'; scope.attrs.change();
+  const tabs = walk(dom).filter(v => v.tag === 'button' && v.className && v.className.startsWith('wds-tab'));
+  assert.equal(tabs.length, 4);
+  await tabs[2].attrs.click();
+  const content = walk(dom).find(v => v.attrs.class === 'wds-content');
+  assert.deepEqual(content.children.map(v => v.hidden), [true,true,false,true]);
   assert.equal(polls.length, 1);
   const quotaWidget = walk(dom).find(v => v.tag === 'span' && v.children.length === 2 && v.children[1].tag === 'select' && v.children[1].value === '1024');
   quotaWidget.children[0].value = '1.5';
@@ -58,6 +71,7 @@ async function test() {
   assert.doesNotMatch(text(dom), /稳定优先/);
   assert.equal(config[1][8], '192.0.2.2');
   assert.equal(config[1][15], 'whitelist');
+  assert.equal(config[1][16], 'all_tcp');
   assert.match(config[1][9], /download.windowsupdate.com/);
   assert.equal(config[1][13], '1536');
   assert.equal(config[1][4], 'true');
@@ -67,11 +81,11 @@ async function test() {
   state.direct = 'mobile'; state.health.wifi.online = false;
   await polls[0]();
   assert.match(text(dom), /直连 → 移动数据/);
-  assert.match(text(dom), /待认证或联网检测中/);
+  assert.match(text(dom), /待认证 \/ 检测中/);
   state.mode = 'direct'; state.native_mode = true; state.proxy = 'none';
   await polls[0]();
   assert.match(text(dom), /代理 → 已停用/);
-  assert.match(text(dom), /无代理模式正在使用备用出口/);
+  assert.match(text(dom), /正在使用备用网络/);
   console.log('UI rendering, settings submission and live failover status passed.');
 }
 test().catch(error => { console.error(error); process.exitCode = 1; });

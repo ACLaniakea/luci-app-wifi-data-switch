@@ -4,7 +4,8 @@ module WifiDataBoost
   def self.apply(data,runtime,hw)
     return unless runtime['active']
     devices=runtime.fetch('devices',[]); domains=runtime.fetch('domains',[])
-    return if domains.empty?
+    wide=runtime.fetch('scope','all_tcp')=='all_tcp'
+    return if !wide && domains.empty?
     mode=runtime.fetch('device_mode', devices.empty? ? 'all' : 'whitelist')
     original=Marshal.load(Marshal.dump(data))
     names=[PREFIX+'WIFI',PREFIX+'MOBILE',PREFIX+'POOL']
@@ -19,13 +20,13 @@ module WifiDataBoost
     data['proxy-groups'] << {'name'=>PREFIX+'POOL','type'=>'load-balance','proxies'=>[PREFIX+'WIFI',PREFIX+'MOBILE'],'strategy'=>'round-robin','url'=>'http://connectivitycheck.platform.hicloud.com/generate_204','interval'=>60}
     scope=['NETWORK,UDP,DIRECT','DST-PORT,22,DIRECT','DST-PORT,3389,DIRECT','DST-PORT,47984-48010,DIRECT','DST-PORT,21115-21119,DIRECT']
     ['0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.168.0.0/16','224.0.0.0/4'].each { |net| scope << "IP-CIDR,#{net},DIRECT,no-resolve" }
-    domain_rules=domains.map { |domain| "DOMAIN-SUFFIX,#{domain},#{PREFIX}POOL" } + ['MATCH,DIRECT']
+    domain_rules=wide ? ["MATCH,#{PREFIX}POOL"] : domains.map { |domain| "DOMAIN-SUFFIX,#{domain},#{PREFIX}POOL" } + ['MATCH,DIRECT']
     if mode=='whitelist'
       raise 'Whitelist cannot be empty' if devices.empty?
       devices.each { |ip| scope << "SUB-RULE,(SRC-IP-CIDR,#{ip}),#{PREFIX}DOMAINS" }
     else
       devices.each { |ip| scope << "SRC-IP-CIDR,#{ip},DIRECT" } if mode=='blacklist'
-      scope.concat(domain_rules[0...-1])
+      scope.concat(wide ? domain_rules : domain_rules[0...-1])
     end
     scope << 'MATCH,DIRECT'
     kinds=%w[DOMAIN DOMAIN-SUFFIX DOMAIN-KEYWORD GEOSITE GEOIP IP-CIDR IP-CIDR6 RULE-SET SRC-IP-CIDR DST-PORT SRC-PORT NETWORK]

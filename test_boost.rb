@@ -3,7 +3,7 @@ require_relative 'files/usr/libexec/wifi-data-switch/boost'
 def check(value); raise 'Boost regression failed' unless value; end
 original={'proxies'=>[{'name'=>'proxy','type'=>'socks5','server'=>'127.0.0.1','port'=>1080}], 'proxy-groups'=>[], 'rules'=>['DOMAIN,proxy.example,proxy','DOMAIN-SUFFIX,example.com,DIRECT','IP-CIDR,192.0.2.0/24,DIRECT,no-resolve','MATCH,DIRECT']}
 data=Marshal.load(Marshal.dump(original))
-runtime={'active'=>true,'strategy'=>'round-robin','devices'=>[],'domains'=>['example.com']}
+runtime={'active'=>true,'strategy'=>'round-robin','scope'=>'domains','devices'=>[],'domains'=>['example.com']}
 WifiDataBoost.apply(data,runtime,{})
 check(data['rules'][0]==original['rules'][0])
 check(data['rules'][1]=='SUB-RULE,(DOMAIN-SUFFIX,example.com),WDS-BOOST-SCOPE')
@@ -42,3 +42,21 @@ legacy=Marshal.load(Marshal.dump(original))
 WifiDataBoost.apply(legacy,runtime.merge('strategy'=>'sticky-sessions'),{})
 check(legacy['proxy-groups'].find { |g| g['name']=='WDS-BOOST-POOL' }['strategy']=='round-robin')
 puts 'Legacy sticky setting normalized to round-robin'
+
+%w[all whitelist blacklist].each do |mode|
+  cfg=Marshal.load(Marshal.dump(original))
+  WifiDataBoost.apply(cfg,runtime.merge('scope'=>'all_tcp','domains'=>[],'device_mode'=>mode,'devices'=>['192.0.2.2/32']),{})
+  check(cfg['rules'][0]==original['rules'][0])
+  scope=cfg['sub-rules']['WDS-BOOST-SCOPE']
+  check(scope.include?('DST-PORT,47984-48010,DIRECT'))
+  if mode=='whitelist'
+    check(cfg['sub-rules']['WDS-BOOST-DOMAINS']==['MATCH,WDS-BOOST-POOL'])
+    check(scope.last=='MATCH,DIRECT')
+  else
+    check(scope.include?('MATCH,WDS-BOOST-POOL'))
+    check(scope.index('SRC-IP-CIDR,192.0.2.2/32,DIRECT') < scope.index('MATCH,WDS-BOOST-POOL')) if mode=='blacklist'
+  end
+  File.write(ARGV[0]+'.wide.'+mode,YAML.dump(cfg)) if ARGV[0]
+  WifiDataBoost.restore(cfg);check(cfg['rules']==original['rules'])
+end
+puts 'All DIRECT TCP scope and device exclusions passed'

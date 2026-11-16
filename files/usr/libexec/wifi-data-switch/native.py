@@ -3,12 +3,13 @@ import contextlib,fcntl,ipaddress,json,pathlib,re,subprocess,sys,time
 TABLE='wds_native'
 DNS_KEYS=('server','noresolv')
 
-def rules(cfg,lan,enabled):
-    lines=['flush chain inet wds_native balance','flush chain inet wds_native quota_guard','flush set inet wds_native selected']
-    if not enabled:lines.append('add rule inet wds_native quota_guard meta mark 0x5753 reject with icmpx type admin-prohibited')
+def rules(cfg,lan,enabled,table=TABLE,chain='balance',guard='quota_guard',selected='selected',qualifiers=()):
+    prefix='inet '+table+' '
+    lines=['flush chain '+prefix+chain,'flush chain '+prefix+guard,'flush set '+prefix+selected]
+    if not enabled:lines.append('add rule '+prefix+guard+' meta mark 0x5753 reject with icmpx type admin-prohibited')
     devices=[str(v) for v in ipaddress.collapse_addresses(ipaddress.IPv4Network(v,strict=False) for v in cfg.get('boost_devices','').split())]
-    if devices:lines.append('add element inet wds_native selected { '+', '.join(devices)+' }')
-    base='add rule inet wds_native balance '
+    if devices:lines.append('add element '+prefix+selected+' { '+', '.join(devices)+' }')
+    base='add rule '+prefix+chain+' '
     lines += [base+'iifname != '+json.dumps(lan)+' return',base+'ct direction reply return',
               base+'ip daddr { 0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,198.18.0.0/15,224.0.0.0/4,240.0.0.0/4 } return',
               base+'ct mark & 0xffff { 0x5752, 0x5753 } meta mark set ct mark & 0xffff return',
@@ -16,16 +17,18 @@ def rules(cfg,lan,enabled):
     if enabled:
         lines += [base+'meta l4proto != tcp return',base+'tcp dport { 22,3389,47984-48010,21115-21119 } return']
         mode=cfg.get('boost_device_mode','whitelist' if devices else 'all')
-        if mode=='whitelist':lines.append(base+'ip saddr != @selected return')
-        if mode=='blacklist':lines.append(base+'ip saddr @selected return')
-        lines += [base+'ip daddr @targets meta mark set numgen inc mod 2 map { 0 : 0x5752, 1 : 0x5753 } ct mark set (ct mark & 0xffff0000) | meta mark']
+        if mode=='whitelist':lines.append(base+'ip saddr != @'+selected+' return')
+        if mode=='blacklist':lines.append(base+'ip saddr @'+selected+' return')
+        lines.extend(base+q+' return' for q in qualifiers)
+        match='ip daddr @targets ' if cfg.get('boost_scope','all_tcp')=='domains' else 'meta nfproto ipv4 '
+        lines += [base+match+'meta mark set numgen inc mod 2 map { 0 : 0x5752, 1 : 0x5753 } ct mark set (ct mark & 0xffff0000) | meta mark']
     return '\n'.join(lines)+'\n'
 
 def dns_text(domains):
     return ''.join('nftset=/'+domain+'/4#inet#wds_native#targets\n' for domain in domains)
 
 class Manager:
-    def __init__(self,c):self.c=c;self.path=c.ROOT/'native-state.json';self.signature=None
+    def __init__(self,c):self.c=c;self.path=c.ROOT/'native-state.json';self.signature=None;self.bypass_signature=None
     def state(self):return self.c.read(self.path,{})
     @contextlib.contextmanager
     def locked(self):
@@ -81,6 +84,7 @@ class Manager:
         self.signature=None
     def sync(self,cfg):
         with self.locked():
+            if cfg['mode']!='split':self.cleanup_bypass()
             state=self.state()
             if cfg['mode']=='direct':
                 table=self.c.command(['nft','list','table','inet',TABLE],check=False).returncode==0
@@ -100,6 +104,35 @@ class Manager:
                     self.c.command(['/etc/init.d/dnsmasq','restart'],timeout=20)
             elif state:self._restore();return True
         return False
+    def cleanup_bypass(self):
+        if self.c.command(['nft','list','chain','inet','fw4','wds_balance'],check=False).returncode:
+            self.bypass_signature=None;return
+        self.c.command(['nft','-f','-'],input='delete chain inet fw4 wds_balance\ndelete chain inet fw4 wds_quota_guard\ndelete set inet fw4 wds_selected\n')
+        self.bypass_signature=None
+    def bypass(self,cfg,wifi,mobile,usage):
+        """Balance only IPv4 flows already exempted by OpenClash's China-IP bypass."""
+        c=self.c
+        if cfg['mode']!='split':return
+        chain=c.command(['nft','list','chain','inet','fw4','openclash'],check=False).stdout
+        available=any('ip daddr @china_ip_route ip daddr != @china_ip_route_pass' in row and 'return' in row for row in chain.splitlines())
+        exists=c.command(['nft','list','chain','inet','fw4','wds_balance'],check=False).returncode==0
+        if not available:
+            if exists:self.cleanup_bypass()
+            return
+        if not exists:
+            # Stay in fw4 so both China-IP sets refer to the exact sets OpenClash uses.
+            c.command(['nft','-f','-'],input='add set inet fw4 wds_selected { type ipv4_addr; flags interval; }\nadd chain inet fw4 wds_balance { type filter hook prerouting priority -140; policy accept; }\nadd chain inet fw4 wds_quota_guard { type filter hook forward priority -6; policy accept; }\n')
+            self.bypass_signature=None
+        offload=c.command(['uci','-q','get','firewall.@defaults[0].flow_offloading'],check=False).stdout.strip()=='1'
+        enabled=bool(not offload and cfg.get('boost_enabled') and cfg.get('boost_scope','all_tcp')=='all_tcp' and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
+        hw=c.hardware() if hasattr(c,'hardware') else {'lan_device':'br-lan'}
+        if enabled:
+            import quota
+            quota.enable_forward_meter(c)
+        signature=json.dumps([cfg.get('boost_devices',''),cfg.get('boost_device_mode','all'),enabled])
+        if self.bypass_signature!=signature:
+            c.command(['nft','-f','-'],input=rules({**cfg,'boost_scope':'all_tcp'},hw['lan_device'],enabled,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass')))
+            self.bypass_signature=signature
     def apply(self,cfg,wifi,mobile,usage):
         with self.locked():return self._apply(cfg,wifi,mobile,usage)
     def _apply(self,cfg,wifi,mobile,usage):
@@ -110,7 +143,7 @@ class Manager:
             quota.enable_forward_meter(c)
         enabled=bool(cfg.get('boost_enabled') and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
         hw=c.hardware() if hasattr(c,'hardware') else {'lan_device':'br-lan'}
-        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),enabled])
+        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),cfg.get('boost_scope','all_tcp'),enabled])
         if signature!=self.signature:
             c.command(['nft','-f','-'],input=rules(cfg,hw['lan_device'],enabled))
             domains=cfg.get('boost_domains','').split()

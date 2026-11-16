@@ -132,18 +132,20 @@ def acceleration(args):
         if not isinstance(value,str) or len(value)>8192:raise ValueError('加速范围格式不正确')
         return list(dict.fromkeys(v for v in re.split(r'[\s,]+',value.strip()) if v))
     devices=entries('boost_devices');domains=entries('boost_domains')
+    scope=args.get('boost_scope','all_tcp')
+    if scope not in ('all_tcp','domains'):raise ValueError('无效加速范围')
     mode=args.get('boost_device_mode','whitelist' if devices else 'all')
     if mode not in ('all','whitelist','blacklist'):raise ValueError('无效设备范围')
     for v in devices:ipaddress.IPv4Network(v,strict=False)
     for v in domains:
         if len(v)>253 or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?',v):raise ValueError('域名格式不正确')
-    if enabled and not domains:raise ValueError('开启加速前请填写下载域名')
+    if enabled and scope=='domains' and not domains:raise ValueError('请填写加速域名')
     if enabled and mode=='whitelist' and not devices:raise ValueError('请选择至少一台加速设备')
-    return {'boost_enabled':enabled,'boost_strategy':strategy,'boost_device_mode':mode,'boost_devices':'\n'.join(devices),'boost_domains':'\n'.join(v.lower() for v in domains)}
+    return {'boost_enabled':enabled,'boost_strategy':strategy,'boost_scope':scope,'boost_device_mode':mode,'boost_devices':'\n'.join(devices),'boost_domains':'\n'.join(v.lower() for v in domains)}
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
     return {'enabled':enabled,'active':bool(enabled and cfg['mode'] in ('split','direct') and wifi and mobile),
-            'strategy':'round-robin','device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
+            'strategy':'round-robin','scope':cfg.get('boost_scope','all_tcp'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
     if path is None:return False
@@ -268,6 +270,7 @@ def daemon():
                 boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
                 if read(RUN/'boost.json',{})!=boost:write(RUN/'boost.json',boost)
                 clash_ok=native_manager.apply(cfg,w,c,usage) if cfg['mode']=='direct' else bind_clash(device)
+                native_manager.bypass(cfg,w,c,usage)
                 # Never send DIRECT to Wi-Fi before proxy binding is confirmed.
                 use_wifi=bool(total_blocked or direct_wifi and clash_ok)
                 setup_routes(wifi,cell,use_wifi)
@@ -291,6 +294,7 @@ def daemon():
                 if not running:break
                 time.sleep(1)
     finally:
+        native_manager.cleanup_bypass()
         if native_manager.state():native_manager.restore()
         meter.flush()
         blocked=read(RUN/'usage-status.json',{}).get('mobile_total_exceeded',False)
@@ -300,7 +304,7 @@ def daemon():
         command(['nft','delete','table','inet','wifi_data_switch'],check=False)
         # Keep explicit bound-uplink routes for already established sockets.
         write(RUN/'status.json',{'ready':False,'direct':'wifi' if blocked else 'mobile','proxy':'wifi' if blocked else 'mobile','wifi_direct':bool(blocked),'mobile_blocked':bool(blocked)})
-METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String','boost_device_mode':'String'},'scan':{},'devices':{},'apply':{}}
+METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String','boost_device_mode':'String','boost_scope':'String'},'scan':{},'devices':{},'apply':{}}
 def main():
     ensure_dirs()
     if len(sys.argv)>1 and sys.argv[1]=='native-watchdog':native.watchdog(sys.modules[__name__]);return

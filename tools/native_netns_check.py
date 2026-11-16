@@ -34,10 +34,21 @@ try:
   return subprocess.run(['ip','netns','exec',names['r']]+args,capture_output=True,text=True,**kwargs)
  c=types.SimpleNamespace(ROOT=pathlib.Path('/tmp'),command=command,read=lambda *args:{})
  quota.Meter(c).install();quota.enable_forward_meter(c)
+ run('nft','flush','set','inet','wds_native','targets',ns='r')
+ print('All-TCP test uses an empty DNS target set',flush=True)
  for mode,selected,expected in [('all','',True),('whitelist','10.255.0.2/32',True),('blacklist','10.255.0.2/32',False)]:
   run('nft','-f','-',ns='r',input=native.rules({'boost_device_mode':mode,'boost_devices':selected},'lan',True))
   rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(6)];print(mode,rows,flush=True)
   if set(rows)!=({'w','m'} if expected else {'w'}):raise RuntimeError('Incorrect routing')
+ run('nft','-f','-',ns='r',input=native.rules({'boost_scope':'domains'},'lan',True))
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(4)]
+ assert rows==['w']*4,rows
+ print('Domain-only scope bypasses a nonmatching address:',rows,flush=True)
+ run('nft','add','element','inet','wds_native','targets','{203.0.113.1}',ns='r')
+ run('nft','-f','-',ns='r',input=native.rules({'boost_scope':'domains'},'lan',True))
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(4)]
+ assert set(rows)=={'w','m'},rows
+ print('Domain-only scope balances a matching address:',rows,flush=True)
  data=json.loads(run('nft','-j','list','table','inet','wds_meter',ns='r'));counters={v['counter']['name']:v['counter']['bytes'] for v in data['nftables'] if 'counter' in v}
  assert counters['up']>0 and counters['down']>0,counters
  print('Native mobile accounting:',counters,flush=True)
@@ -45,6 +56,16 @@ try:
  rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(4)]
  assert rows==['w']*4,rows
  print('Quota/disabled acceleration sends new connections over Wi-Fi:',rows,flush=True)
+ run('nft','delete','table','inet','wds_native',ns='r')
+ run('nft','-f','-',ns='r',input='table inet fw4 {\n set china_ip_route { type ipv4_addr; flags interval; elements = {203.0.113.1}; }\n set china_ip_route_pass { type ipv4_addr; flags interval; }\n set wds_selected { type ipv4_addr; flags interval; }\n chain wds_balance { type filter hook prerouting priority -140; policy accept; }\n chain wds_quota_guard { type filter hook forward priority -6; policy accept; }\n}\n')
+ run('nft','-f','-',ns='r',input=native.rules({'boost_scope':'all_tcp'},'lan',True,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass')))
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(6)]
+ assert set(rows)=={'w','m'},rows
+ print('OpenClash China-IP bypass uses both uplinks:',rows,flush=True)
+ run('nft','add','element','inet','fw4','china_ip_route_pass','{203.0.113.1}',ns='r')
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(4)]
+ assert rows==['w']*4,rows
+ print('OpenClash bypass exceptions stay unmarked:',rows,flush=True)
  print('Independent native forwarding test passed without OpenClash',flush=True)
 finally:
  for p in procs:p.terminate()
