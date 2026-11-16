@@ -5,7 +5,7 @@
 'require ui';
 
 var api = {};
-[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band']],
+[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains']],
  ['scan', []]].forEach(function(entry) {
     api[entry[0]] = rpc.declare({ object: 'wifi-data-switch', method: entry[0], params: entry[1], expect: {} });
 });
@@ -67,6 +67,7 @@ return view.extend({
                 E('p', {}, [E('strong', {}, ['直连 → ' + routeLabel(s.direct)]), '　　', E('strong', {}, ['OpenClash 代理 → ' + routeLabel(s.proxy)])]),
                 E('p', {}, [s.ready ? (s.clash_bound ? (fallback ? '当前正在使用备用出口；原出口恢复后自动回切。' : '分流规则已就绪，正在自动监测两条出口。') : '正在准备 OpenClash 绑定；暂由移动数据保持连接。') : '监测服务正在启动或已停止。']),
                 E('p', {}, ['最近出口变化：' + switchedAt]),
+                E('p', {}, ['双网加速：' + (s.boost && s.boost.active && s.clash_bound ? '运行中' : (s.boost && s.boost.enabled ? '等待分流模式、双网健康及代理绑定' : '已关闭'))]),
                 E('small', {}, ['连续3次检测失败转移，连续2次成功恢复；检测周期约10–20秒。切换可能使已有连接重新建立。']));
 
         }
@@ -95,12 +96,19 @@ return view.extend({
                 }) : [E('p', {}, ['未发现可用网络。扫描期间当前 Wi-Fi 可能有短暂波动。'])]);
             });
         }, false);
+        var boostEnabled = E('input', { type: 'checkbox' }); boostEnabled.checked = !!cfg.boost_enabled;
+        var boostStrategy = E('select', { 'class': 'cbi-input-select' }, [E('option', { value: 'sticky-sessions' }, ['稳定优先：同设备同站点固定出口']), E('option', { value: 'round-robin' }, ['吞吐优先：新连接轮流使用双网'])]);
+        boostStrategy.value = cfg.boost_strategy || 'sticky-sessions';
+        var boostDevices = E('textarea', { 'class': 'cbi-input-textarea', rows: '3', placeholder: '每行一个设备 IPv4 或网段' }, [cfg.boost_devices || '']); boostDevices.value = cfg.boost_devices || '';
+        var boostDomains = E('textarea', { 'class': 'cbi-input-textarea', rows: '3', placeholder: '每行一个域名，包含其子域名' }, [cfg.boost_domains || '']); boostDomains.value = cfg.boost_domains || '';
         var settings = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['出口与无线设置']),
+            row('直连双网加速', boostEnabled, '仅分流模式下生效；只处理指定范围内原本 DIRECT 的 TCP 连接。单连接不叠加带宽。'),
+            row('加速策略', boostStrategy), row('加速设备', boostDevices), row('加速域名', boostDomains, '设备与域名为任选其一匹配；建议先仅填写下载域名。UDP、内网、SSH、远程桌面保留原出口。'),
             row('上网模式', mode, '分流模式遵循 OpenClash 当前规则：DIRECT 使用 Wi-Fi，代理节点使用移动数据。'),
             row('自动故障转移', failover, '任一出口不可用时使用另一条；原出口连续检测恢复后自动回切。'),
             row('无线名称（SSID）', ssid), row('无线频段', band), row('无线加密', encryption), row('无线密码', key),
             row('网络扫描', E('div', {}, [scanButton, scanResult])),
-            button('保存并应用', function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value).then(function(r) { if (r.ok) key.value = '';notify(r); }); }, true)]);
+            button('保存并应用', function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value).then(function(r) { if (r.ok) key.value = '';notify(r); }); }, true)]);
 
         return E('div', {}, [E('h2', {}, ['Wi-Fi / 数据切换']),
             E('p', {}, ['保持 Wi-Fi 与移动数据同时在线，为下层设备选择出口，并与 OpenClash 配合分流。']), cards,

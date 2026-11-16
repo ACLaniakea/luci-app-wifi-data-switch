@@ -21,6 +21,8 @@ jobs:
         run: |
           python3 -m compileall -q files install.py
           ruby -c files/usr/libexec/wifi-data-switch/overlay.rb
+          ruby -c files/usr/libexec/wifi-data-switch/boost.rb
+          ruby test_boost.rb
           ruby -e "require 'yaml'; require 'json'"
           sh -n files/etc/init.d/wifi-data-switch
           sh -n files/usr/libexec/rpcd/wifi-data-switch

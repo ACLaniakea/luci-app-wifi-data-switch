@@ -10,7 +10,9 @@ mobile = hardware.fetch('mobile_device', 'sipa_eth0')
 wifi = hardware.fetch('wifi_device', 'wlan-sta')
 iface = File.exist?(iface_file) ? File.read(iface_file).strip : mobile
 raise 'Invalid uplink interface' unless [mobile, wifi].include?(iface)
+require_relative 'boost'
 data = YAML.load_file(path, aliases: true)
+WifiDataBoost.restore(data)
 mark = iface == mobile ? 22353 : 22354
 apply = lambda do |proxy|
   next unless proxy.is_a?(Hash)
@@ -28,6 +30,9 @@ end
   provider['override']['ip-version'] = 'ipv4'
   (provider['payload'] || []).each { |proxy| apply.call(proxy) }
 end
+runtime_file='/var/run/wifi-data-switch/boost.json'
+runtime=File.exist?(runtime_file) ? JSON.parse(File.read(runtime_file)) : {}
+WifiDataBoost.apply(data,runtime,hardware)
 tmp = path + '.wifi-data-new'
 File.open(tmp, File::WRONLY | File::CREAT | File::TRUNC, 0600) { |file| file.write(YAML.dump(data)); file.flush; file.fsync }
 File.rename(tmp, path)
