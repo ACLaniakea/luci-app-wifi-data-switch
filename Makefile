@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-wifi-data-switch
-PKG_VERSION:=0.4.1
+PKG_VERSION:=0.6.0
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKGARCH:=all
@@ -12,7 +12,7 @@ define Package/luci-app-wifi-data-switch
   SECTION:=luci
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
-  TITLE:=Wi-Fi and mobile uplink switching with OpenClash
+  TITLE:=Wi-Fi and mobile uplink switching and download balancing
   DEPENDS:=+luci-base +python3 +ruby +ruby-yaml +ruby-json +curl +ca-bundle +iw +rpcd-mod-iwinfo +ip-full +nftables
 endef
 

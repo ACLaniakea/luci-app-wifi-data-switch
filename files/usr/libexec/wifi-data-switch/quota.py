@@ -60,6 +60,10 @@ def mobile_guard(c,device,blocked):
     if blocked and not exists:c.command(['nft','-f','-'],input=guard_script(device))
     if not blocked and exists:c.command(['nft','delete','table','inet','wds_mobile_limit'])
 
+def enable_forward_meter(c):
+    if c.command(['nft','list','chain','inet','wds_meter','forward_tx'],check=False).returncode==0:return
+    c.command(['nft','-f','-'],input='add chain inet wds_meter forward_tx { type filter hook forward priority -140; policy accept; }\nadd rule inet wds_meter forward_tx ct direction original meta mark 0x5753 ct mark set ct mark | 0x40000000 counter name up\n')
+
 class Meter:
     def __init__(self,c):self.c=c;self.state=c.read(c.ROOT/'usage.json',{});self.saved=0
     def install(self):

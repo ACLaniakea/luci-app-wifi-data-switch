@@ -33,8 +33,8 @@ return view.extend({
     load: function() { return api.status(); },
     render: function(initial) {
         var cfg = initial.settings || {};
-        var modes = { split: 'OpenClash 分流', wifi: '全部走 Wi-Fi', mobile: '全部走移动数据' };
-        var routeLabel = function(v) { return v === 'wifi' ? 'Wi-Fi' : '移动数据'; };
+        var modes = { split: 'OpenClash 分流', wifi: '全部走 Wi-Fi', mobile: '全部走移动数据', direct: '仅双网加速（无代理）' };
+        var routeLabel = function(v) { return v === 'none' ? '已停用' : (v === 'wifi' ? 'Wi-Fi' : '移动数据'); };
         var cards = E('div', { 'style': 'display:flex;gap:14px;flex-wrap:wrap;margin:16px 0' });
         var summary = E('div');
         var usagePanel = E('div', { 'class': 'cbi-section', style: 'padding:16px' });
@@ -71,14 +71,14 @@ return view.extend({
                 E('small', {}, ['路由器估算，非运营商账单。约每轮检测更新、每分钟保存；突然断电可能少计最后一分钟。跨日连接按采样时刻归属。']));
             var savedMode = s.mode || (s.settings || {}).mode;
             var normalDirect = savedMode === 'mobile' ? 'mobile' : 'wifi';
-            var normalProxy = savedMode === 'wifi' ? 'wifi' : 'mobile';
+            var normalProxy = savedMode === 'direct' ? 'none' : (savedMode === 'wifi' ? 'wifi' : 'mobile');
             var fallback = s.ready && (s.direct !== normalDirect || s.proxy !== normalProxy);
             var switchedAt = s.last_switch && s.last_switch.time ? new Date(s.last_switch.time * 1000).toLocaleString() : '尚无记录';
             summary.replaceChildren(E('p', {}, [s.pending ? '有已保存但未应用的设置。' : '当前设置已应用。']),
                 E('p', {}, [s.quota_wifi_only ? '移动总量到额，当前强制全部走 Wi-Fi；Wi-Fi 断线时不回退移动网络。' : '按所选模式自动选择出口。']),
                 E('p', {}, ['当前模式：' + (modes[savedMode] || '初始化中')]),
-                E('p', {}, [E('strong', {}, ['直连 → ' + routeLabel(s.direct)]), '　　', E('strong', {}, ['OpenClash 代理 → ' + routeLabel(s.proxy)])]),
-                E('p', {}, [s.ready ? (s.clash_bound ? (fallback ? '当前正在使用备用出口；原出口恢复后自动回切。' : '分流规则已就绪，正在自动监测两条出口。') : '正在准备 OpenClash 绑定；暂由移动数据保持连接。') : '监测服务正在启动或已停止。']),
+                E('p', {}, [E('strong', {}, ['直连 → ' + routeLabel(s.direct)]), '　　', E('strong', {}, ['代理 → ' + routeLabel(s.proxy)])]),
+                E('p', {}, [s.ready ? (s.native_mode ? (fallback ? '无代理模式正在使用备用出口；恢复后自动回切。' : '无代理模式已运行：平时走 Wi-Fi，指定下载可使用双网。') : s.clash_bound ? (fallback ? '当前正在使用备用出口；原出口恢复后自动回切。' : '分流规则已就绪，正在自动监测两条出口。') : '正在准备 OpenClash 绑定；暂由移动数据保持连接。') : '监测服务正在启动或已停止。']),
                 E('p', {}, ['最近出口变化：' + switchedAt]),
                 E('p', {}, ['双网加速：' + (s.boost && s.boost.active && s.clash_bound ? '运行中' : (s.boost && s.boost.reason ? s.boost.reason : '已关闭'))]),
                 E('small', {}, ['连续3次检测失败转移，连续2次成功恢复；检测周期约10–20秒。切换可能使已有连接重新建立。']));
@@ -168,12 +168,12 @@ return view.extend({
         var mobileMonthly = quotaInput(cfg.mobile_monthly_mib);
         var billingDay = E('input', { type: 'number', min: '1', max: '28', value: cfg.billing_day || 1 });
         var accelerationPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['加速范围']),
-            row('直连双网加速', boostEnabled, '仅分流模式下生效；只处理指定范围内原本 DIRECT 的 TCP 连接。新连接轮流使用双网，单连接不叠加带宽。'),
-            row('设备范围', devicePicker, '默认全部设备。白名单只允许所选设备，黑名单排除所选设备。列表来自租约和邻居缓存，不保证设备此刻在线。'), row('手动 IP／网段', boostDevices, '可选：用于白名单或黑名单。IP 可能变化，长期使用建议设置静态租约。'), row('加速域名', domainPicker, '只有设备范围和域名同时匹配，且原规则明确走 DIRECT，才参与加速。清空域名不能启用加速。'),
+            row('直连双网加速', boostEnabled, '分流模式或无代理模式下生效；按下载域名和设备范围选择 TCP 连接。新连接轮流使用双网，单连接不叠加带宽。'),
+            row('设备范围', devicePicker, '默认全部设备。白名单只允许所选设备，黑名单排除所选设备。列表来自租约和邻居缓存，不保证设备此刻在线。'), row('手动 IP／网段', boostDevices, '可选：用于白名单或黑名单。IP 可能变化，长期使用建议设置静态租约。'), row('加速域名', domainPicker, '只有设备范围和域名同时匹配才参与加速；分流模式还要求原规则明确走 DIRECT。清空域名不能启用加速。'),
             E('p', {}, ['建议仅填写下载域名。游戏、会议、支付和远程控制设备不要整体加入吞吐优先。'])]);
-        var quotaPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['流量限额']), row('每日移动总额度', mobileDaily.widget, '含代理、普通上网和加速；0 表示不限额'), row('每月移动总额度', mobileMonthly.widget, '达到后代理和直连全部走 Wi-Fi，停用移动出口；Wi-Fi 不可用时不会回退到移动数据'), row('每日加速额度', dailyLimit.widget, '0 表示不限额'), row('每月加速额度', monthlyLimit.widget, '只限制额外加速流量，不限制原有代理流量'), row('每月结算日', billingDay, '1–28 日。修改周期不会清空已有用量。'), E('p', {}, ['加速额度到额：停止新移动加速连接，已有连接自然结束。移动总额度到额：全部改走 Wi-Fi，现有移动连接会中断并需重连。'])]);
+        var quotaPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['流量限额']), row('每日移动总额度', mobileDaily.widget, '含代理、普通上网和加速；0 表示不限额'), row('每月移动总额度', mobileMonthly.widget, '达到后代理和直连全部走 Wi-Fi，停用移动出口；Wi-Fi 不可用时不会回退到移动数据'), row('每日加速额度', dailyLimit.widget, '0 表示不限额'), row('每月加速额度', monthlyLimit.widget, '只限制额外加速流量，不限制原有代理流量'), row('每月结算日', billingDay, '1–28 日。修改周期不会清空已有用量。'), E('p', {}, ['加速额度到额：停止新增移动加速；无代理模式还会断开既有移动加速连接。移动总额度到额：全部改走 Wi-Fi，现有移动连接会中断并需重连。'])]);
         var settings = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['出口与无线设置']),
-            row('上网模式', mode, '分流模式遵循 OpenClash 当前规则：DIRECT 使用 Wi-Fi，代理节点使用移动数据。'),
+            row('上网模式', mode, '分流模式配合 OpenClash。无代理模式会停用 OpenClash，使用独立 DNS 和系统分流；切换时连接可能需要重建。'),
             row('自动故障转移', failover, '任一出口不可用时使用另一条；原出口连续检测恢复后自动回切。'),
             row('无线名称（SSID）', ssid), row('无线频段', band), row('无线加密', encryption), row('无线密码', key),
             row('网络扫描', E('div', {}, [scanButton, scanResult])),

@@ -1,12 +1,12 @@
 # Wi-Fi / 数据切换
 
-为 F50 设计的 OpenWrt LuCI 插件（目前仅在 F50 上测试）：让 **OpenClash 的 DIRECT 流量走 Wi-Fi，代理节点走移动数据**，并提供双向故障切换、手动出口选择和实时状态页面。
+为 F50 设计的 OpenWrt LuCI 插件（目前仅在 F50 上测试）：让 **OpenClash 的 DIRECT 流量走 Wi-Fi，代理节点走移动数据**，也可使用不依赖 OpenClash 的「仅双网加速（无代理）」模式，并提供双向故障切换、手动出口选择和实时状态页面。
 
 Wi-Fi/cellular uplink selection and failover for OpenWrt, with OpenClash integration. **Experimental; originally developed and tested on F50 / MU300.**
 
 ## 状态与适用范围
 
-当前 `0.4.0` 是从实际使用版本整理的实验性源码。原始版本在 F50 / MU300、OpenWrt 25.12 系列上验证过；本公开版本删除了专用网络认证与部署配置，增加了接口参数文件。公开版本的这些调整经过自动化测试，尚未重新在实体路由器部署验证。其他硬件尚未验证，不是任意 OpenWrt 设备即装即用的通用成品。
+当前 `0.6.0` 是从实际使用版本整理的实验性源码。原始版本在 F50 / MU300、OpenWrt 25.12 系列上验证过；本公开版本删除了专用网络认证与部署配置，增加了接口参数文件。公开版本的这些调整经过自动化测试，尚未重新在实体路由器部署验证。其他硬件尚未验证，不是任意 OpenWrt 设备即装即用的通用成品。
 
 **不包含门户自动登录、校园账号保存或登录报文重放。** 需要网页认证的 Wi-Fi 请自行通过浏览器完成认证；插件只检测联网状态。
 
@@ -17,6 +17,7 @@ Wi-Fi/cellular uplink selection and failover for OpenWrt, with OpenClash integra
 | OpenClash 分流 | Wi-Fi | 移动数据 |
 | 全部走 Wi-Fi | Wi-Fi | Wi-Fi |
 | 全部走移动数据 | 移动数据 | 移动数据 |
+| 仅双网加速（无代理） | 默认 Wi-Fi，指定下载连接分担到双网 | 停用 OpenClash |
 
 “全部走某出口”表示改变代理节点连接外网使用的底层网络，保留 OpenClash 原有代理规则，并不关闭代理。这里的代理流量由 OpenClash 的规则决定，不是按地理位置自动识别所有境外流量。
 
@@ -48,7 +49,8 @@ Wi-Fi 使用已有 STA 无线 WAN + NAT，属于路由模式，不是四地址�
 ## 安装前提
 
 1. 两条 IPv4 上联已经配置好，蜂窝为主路由默认出口；Wi-Fi 已加入 WAN 防火墙区域，具有 NAT 和 LAN 转发权限。
-2. OpenClash / Mihomo 已运行，进程名为 `clash`，启动参数包含 `-f` 配置文件；核心位于 `/etc/openclash/clash`。适配的是 OpenClash TPROXY 常见布局，TUN 和其他透明代理布局尚未验证。
+2. 前三种模式需要 OpenClash / Mihomo 已运行，进程名为 `clash`，启动参数包含 `-f` 配置文件；核心位于 `/etc/openclash/clash`。适配的是 OpenClash TPROXY 常见布局，TUN 和其他透明代理布局尚未验证。
+   仅双网加速模式不需要安装 OpenClash；需要 `dnsmasq --version` 显示 `nftset` 支持（一般使用 dnsmasq-full），并关闭防火墙流量分载以保证计量。缺少支持时应用会提示，插件不会自行卸载 DNS 软件或修改加速开关。
 3. Wi-Fi 使用专用上联 radio；页面修改频段会重载该 radio。若它同时承载客户端 AP，客户端可能断网。
 4. 安装 Python 3（3.9+）、Ruby、Ruby YAML/JSON、curl、CA 证书、iw、ip-full、nftables，以及 LuCI / rpcd 和 iwinfo 扫描支持。包名以固件仓库为准：`python3 ruby ruby-yaml ruby-json curl ca-bundle iw ip-full nftables rpcd-mod-iwinfo luci-base`。
 
@@ -60,7 +62,7 @@ Wi-Fi 使用已有 STA 无线 WAN + NAT，属于路由模式，不是四地址�
 python3 install.py
 ```
 
-安装器备份网络配置、原 OpenClash 自定义覆写钩子和被覆盖的插件文件到 `/root/wifi-data-switch-backups/时间戳/`；复制 LuCI 和后端文件，安装独立标记的 OpenClash 钩子。它不会启用或启动监测服务，也不会创建网络接口或修改 LAN 地址。新装初始模式为移动数据。
+安装器备份网络配置、原 OpenClash 自定义覆写钩子和被覆盖的插件文件到 `/root/wifi-data-switch-backups/时间戳/`；复制 LuCI 和后端文件，OpenClash 存在时安装独立标记的覆写钩子。它不会启用或启动监测服务，也不会创建网络接口或修改 LAN 地址。新装时有 OpenClash 钩子则初始为移动数据，否则为仅双网加速模式（加速开关初始关闭）。
 
 备份可能含 Wi-Fi 密码或订阅信息，请只留在自己设备上。
 
@@ -87,7 +89,7 @@ chmod 600 /etc/wifi-data-switch/hardware.json
 
 参数修改后需重启本插件。接口参数目前通过文件设置，前端配置向导留待后续完善。
 
-确认原蜂窝出口和 OpenClash 正常、参数无误后启用：
+确认原蜂窝出口正常、参数无误后启用；使用代理相关模式还需确认 OpenClash 正常：
 
 ```sh
 /etc/init.d/wifi-data-switch enable
@@ -178,7 +180,7 @@ MIT，详见 [LICENSE](LICENSE)。本仓库不包含 OpenClash/Mihomo，其代�
 
 ## 0.2.0：指定范围的直连双网加速
 
-在分流模式下开启「直连双网加速」，填写设备 IPv4/网段或域名。0.5.0 起设备范围与域名同时匹配才加速，设备模式默认为全部设备。两条出口必须同时通过健康检测，否则恢复原来的单出口与故障转移。
+在分流或仅双网加速模式下开启「直连双网加速」，填写设备 IPv4/网段或域名。0.5.0 起设备范围与域名同时匹配才加速，设备模式默认为全部设备。两条出口必须同时通过健康检测，否则恢复原来的单出口与故障转移。
 
 仅将原配置中明确以 DIRECT 为目标的简单规则接入范围子规则，保留规则顺序和代理目标。手动选择 DIRECT 的代理组、复杂逻辑规则和未经过 Mihomo 的绕行流量不在首版支持范围内。只加速 TCP；UDP、私网、SSH、RDP、Sunshine 和 RustDesk 常用端口保留原出口。自定义远程端口不保证自动识别，勿把相关设备整体纳入吞吐优先。
 
@@ -247,3 +249,18 @@ F50 测试：完整 IPv4/IPv6 guard 的 nft 语法检查通过；将同一规则
 移除「稳定优先」选项和策略选择框。双网加速统一使用 round-robin，将新连接轮流分配到健康的 Wi-Fi/移动出口。开启开关、设备/域名范围和额度规则不变。旧配置/API 中的 sticky-sessions 值仍接受，但在运行时和生成配置时统一转换为 round-robin，不再生成黏性加速组。
 
 这不代表所有下载必定更快：单 TCP/QUIC 连接不叠加带宽，线路波动和慢连接仍可能拖累总完成时间。历史测试中的稳定优先数据作为对照保留，该选项现已移除。
+
+
+## 仅双网加速（无代理），0.6.0
+
+在「上网模式」选择此项，分别点击保存设置、应用已保存设置。开启「直连双网加速」后，符合设备范围和下载域名的 IPv4 TCP 新连接轮流走 Wi-Fi / 移动数据；普通流量优先 Wi-Fi，健康检测与故障切换继续有效。单条 TCP 连接仍只用一条出口，多连接下载才可能提升总吞吐。
+
+该模式由 dnsmasq nftset、nftables 和策略路由完成，不调用 Clash API、不需要代理核心。若 OpenClash 原本运行，会停止它并暂时禁用其开机启动；离开该模式或正常停止插件时恢复原来的 DNS 设置、OpenClash 运行与启用状态。不能在此模式下继续使用原代理。切换会使部分连接失效，客户端可能需要重新连接或清除旧 Fake-IP DNS 缓存。
+
+DNS 使用 223.5.5.5 / 119.29.29.29，通过 dnsmasq 配置目录加载域名到 `inet wds_native` 的 IPv4 集合。设备须使用路由器 DNS；独立 DoH、缓存的地址和硬编码 IP 可能不命中。相同 CDN IP 承载的其他域名也可能一并命中。此模式不提供 UDP、IPv6 或路由器自身下载的双网加速。原本直连不可达的 Steam CDN 不会因切换模式自动恢复可达。
+
+加速移动流量计量覆盖转发方向及回包，使用已有日/月限额。加速额度到额或关闭加速会停止新加速分配，并拒绝既有移动加速连接，使其重连；Wi-Fi 连接保留。移动总量到额仍以全局移动出口拦截为最高优先级。检测和采样存在间隔，限额不是逐字节硬封顶。
+
+运行中会保留 DNS / OpenClash 状态备份，检测重启后丢失的临时 nft 表和 DNS 文件并重建。启动失败会尝试恢复原设置；120 秒内未就绪时由独立守护进程尝试回退。仅在 F50 关闭流量分载的环境验证，其他流量加速实现可能影响逐包计量。
+
+验证：34 项 Python 测试和 LuCI 页面测试；F50 内核 nft 语法、独立 DNS 填充集合，以及隔离网络命名空间的真实 TCP 转发、设备名单、双向移动计量、停用后 Wi-Fi 回退均通过。隔离测试不改变生产 DNS 或上网模式，尚未在生产链路完整切换本模式或执行断电恢复测试。

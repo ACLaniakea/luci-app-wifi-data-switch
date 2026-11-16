@@ -7,6 +7,7 @@ other uplink. Wi-Fi keys stay in UCI and are never passed in process arguments.
 """
 import lan_devices
 import hashlib
+import native
 import quota
 import fcntl
 import ipaddress
@@ -56,8 +57,8 @@ def health_sample(state,success,link_up=True):
     if state['bad']>=3 or not link_up:state['online']=False
 def choose_uplinks(cfg,wifi_online,mobile_online):
     fallback=cfg.get('failover',True)
-    if not fallback:return cfg['mode'] in ('split','wifi'),cfg['mode']=='wifi'
-    direct_wifi=wifi_online and (cfg['mode'] in ('split','wifi') or fallback and not mobile_online)
+    if not fallback:return cfg['mode'] in ('split','wifi','direct'),cfg['mode']=='wifi'
+    direct_wifi=wifi_online and (cfg['mode'] in ('split','wifi','direct') or fallback and not mobile_online)
     proxy_wifi=wifi_online and (cfg['mode']=='wifi' or fallback and not mobile_online)
     return bool(direct_wifi),bool(proxy_wifi)
 def ubus(name):
@@ -141,7 +142,7 @@ def acceleration(args):
     return {'boost_enabled':enabled,'boost_strategy':strategy,'boost_device_mode':mode,'boost_devices':'\n'.join(devices),'boost_domains':'\n'.join(v.lower() for v in domains)}
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
-    return {'enabled':enabled,'active':bool(enabled and cfg['mode']=='split' and wifi and mobile),
+    return {'enabled':enabled,'active':bool(enabled and cfg['mode'] in ('split','direct') and wifi and mobile),
             'strategy':'round-robin','device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
@@ -192,7 +193,6 @@ def status():
     s['last_error']=read(RUN/'error.json',{})
     s['recommended_domains']=lan_devices.RECOMMENDED_DOMAINS
     s['download_groups']=lan_devices.DOWNLOAD_GROUPS
-    s['download_groups']=lan_devices.DOWNLOAD_GROUPS
     s['usage']=read(RUN/'usage-status.json',{})
     s['boost']=read(RUN/'boost.json',{'active':False})
     s['last_switch']=read(RUN/'last-switch.json',{})
@@ -200,7 +200,7 @@ def status():
 def configure(args,apply=False):
     hw=hardware();station='wireless.'+hw['station'];radio='wireless.'+hw['radio']
     cfg=config();mode=args.get('mode',cfg['mode']);ssid=args.get('ssid',cfg['ssid']);enc=args.get('encryption',cfg['encryption']);band=args.get('band',cfg.get('band','5g'))
-    if mode not in ('split','mobile','wifi') or enc not in ('none','psk2','sae','sae-mixed'):raise ValueError('无效模式或加密方式。')
+    if mode not in ('split','mobile','wifi','direct') or enc not in ('none','psk2','sae','sae-mixed'):raise ValueError('无效模式或加密方式。')
     if band not in ('2g','5g'):raise ValueError('无效无线频段。')
     if not isinstance(ssid,str) or not 1<=len(ssid.encode())<=32 or '\x00' in ssid:raise ValueError('Wi-Fi 名称长度须为1–32字节。')
     key=args.get('wifi_key','')
@@ -212,6 +212,7 @@ def configure(args,apply=False):
         draft['failover']=str(args.get('failover',cfg.get('failover',True))).lower() in ('true','1','yes','on')
         write(ROOT/'pending.json',draft)
         return {'ok':True,'message':'已保存，尚未生效。点击应用已保存设置后生效。'}
+    if mode=='direct':native.Manager(sys.modules[__name__]).preflight()
     oldssid=command(['uci','-q','get',station+'.ssid'],check=False).stdout.strip();oldenc=command(['uci','-q','get',station+'.encryption'],check=False).stdout.strip()
     if enc!='none' and not key and not command(['uci','-q','get',station+'.key'],check=False).stdout.strip():raise ValueError('请填写无线密码。')
     oldband=command(['uci','-q','get',radio+'.band'],check=False).stdout.strip()
@@ -235,6 +236,7 @@ def configure(args,apply=False):
 def daemon():
     ensure_dirs();lock=open(RUN/'daemon.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     scores={'wifi':{'good':0,'bad':0,'online':False},'mobile':{'good':0,'bad':0,'online':False}}
+    native_manager=native.Manager(sys.modules[__name__])
     meter=quota.Meter(sys.modules[__name__])
     running=True;last_selection=None
     def stop(*_):
@@ -244,7 +246,9 @@ def daemon():
     try:
         while running:
             try:
-                cfg=config();hw=hardware();wifi=iface(hw['wifi_network']);cell=iface(hw['mobile_network'])
+                cfg=config();changed=native_manager.sync(cfg)
+                if changed:scores={'wifi':{'good':0,'bad':0,'online':False},'mobile':{'good':0,'bad':0,'online':False}}
+                hw=hardware();wifi=iface(hw['wifi_network']);cell=iface(hw['mobile_network'])
                 setup_routes(wifi,cell,False if not read(RUN/'status.json',{}).get('wifi_direct') else True)
                 for label,info in [('mobile',cell),('wifi',wifi)]:
                     success=bool(info['up'] and probe(info['device']));s=scores[label]
@@ -260,14 +264,14 @@ def daemon():
                 direct_wifi,proxy_wifi=quota.select_policy(cfg,w,c,usage,choose_uplinks)
                 device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
                 boost=boost_runtime(cfg,w,c)
-                boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流模式' if cfg['mode']!='split' else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到移动总流量额度' if usage.get('mobile_total_exceeded') else '已达到加速流量额度' if usage['exceeded'] else '双网加速已就绪'))))
+                boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流或仅双网加速模式' if cfg['mode'] not in ('split','direct') else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到移动总流量额度' if usage.get('mobile_total_exceeded') else '已达到加速流量额度' if usage['exceeded'] else '双网加速已就绪'))))
                 boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
                 if read(RUN/'boost.json',{})!=boost:write(RUN/'boost.json',boost)
-                clash_ok=bind_clash(device)
+                clash_ok=native_manager.apply(cfg,w,c,usage) if cfg['mode']=='direct' else bind_clash(device)
                 # Never send DIRECT to Wi-Fi before proxy binding is confirmed.
                 use_wifi=bool(total_blocked or direct_wifi and clash_ok)
                 setup_routes(wifi,cell,use_wifi)
-                selection=('wifi' if use_wifi else 'mobile','wifi' if total_blocked or proxy_wifi and clash_ok else 'mobile')
+                selection=('wifi' if use_wifi else 'mobile','none' if cfg['mode']=='direct' else ('wifi' if total_blocked or proxy_wifi and clash_ok else 'mobile'))
                 if selection!=last_selection:
                     command(['logger','-t','wifi-data-switch','direct='+selection[0]+' proxy='+selection[1]],check=False)
                     write(RUN/'last-switch.json',{'time':int(time.time()),'direct':selection[0],'proxy':selection[1]})
@@ -277,7 +281,7 @@ def daemon():
                             if service.exists() and command([str(service),'enabled'],check=False).returncode==0:
                                 subprocess.Popen([str(service),'restart'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
                     last_selection=selection
-                write(RUN/'status.json',{'ready':True,'time':int(time.time()),'wifi_direct':use_wifi,'direct':selection[0],'proxy':selection[1],'health':scores,'clash_bound':clash_ok,'mode':cfg['mode'],'mobile_blocked':total_blocked,'quota_wifi_only':total_blocked})
+                write(RUN/'status.json',{'ready':True,'time':int(time.time()),'wifi_direct':use_wifi,'direct':selection[0],'proxy':selection[1],'health':scores,'clash_bound':clash_ok,'mode':cfg['mode'],'native_mode':cfg['mode']=='direct','mobile_blocked':total_blocked,'quota_wifi_only':total_blocked})
                 (RUN/'error.json').unlink(missing_ok=True)
             except Exception as error:
                 rule(31020,[],False)
@@ -287,6 +291,7 @@ def daemon():
                 if not running:break
                 time.sleep(1)
     finally:
+        if native_manager.state():native_manager.restore()
         meter.flush()
         blocked=read(RUN/'usage-status.json',{}).get('mobile_total_exceeded',False)
         if not blocked:
@@ -298,6 +303,7 @@ def daemon():
 METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String','boost_device_mode':'String'},'scan':{},'devices':{},'apply':{}}
 def main():
     ensure_dirs()
+    if len(sys.argv)>1 and sys.argv[1]=='native-watchdog':native.watchdog(sys.modules[__name__]);return
     if len(sys.argv)>1 and sys.argv[1]=='daemon':daemon();return
     if len(sys.argv)>1 and sys.argv[1]=='list':print(json.dumps(METHODS));return
     method=sys.argv[2] if len(sys.argv)>2 and sys.argv[1]=='call' else 'status'

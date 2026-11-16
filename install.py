@@ -20,10 +20,9 @@ def main():
             shutil.copy2(path, backup / name)
             (backup / name).chmod(0o600)
     hook = pathlib.Path('/etc/openclash/custom/openclash_custom_overwrite.sh')
-    if not hook.exists():
-        raise SystemExit('Configure OpenClash first; its custom overwrite hook is missing.')
-    shutil.copy2(hook, backup / 'openclash_custom_overwrite.sh')
-    (backup / 'openclash_custom_overwrite.sh').chmod(0o600)
+    if hook.exists():
+        shutil.copy2(hook, backup / 'openclash_custom_overwrite.sh')
+        (backup / 'openclash_custom_overwrite.sh').chmod(0o600)
     for src in source.rglob('*'):
         if not src.is_file() or '__pycache__' in src.parts or src.suffix == '.pyc':
             continue

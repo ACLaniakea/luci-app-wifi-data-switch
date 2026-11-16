@@ -14,9 +14,7 @@ HOOK = pathlib.Path('/etc/openclash/custom/openclash_custom_overwrite.sh')
 
 def edit_hook(remove=False):
     if not HOOK.exists():
-        if remove:
-            return
-        raise RuntimeError('Configure OpenClash before setting up this plugin')
+        return
     text = HOOK.read_text()
     text = re.sub(r'(?m)^' + re.escape(BEGIN) + r'\n.*?^' + re.escape(END) + r'\n?', '', text, flags=re.S)
     if not remove:
@@ -39,12 +37,12 @@ def main():
             def uci(key, default):
                 value = controller.command(['uci', '-q', 'get', key], check=False).stdout.strip()
                 return value or default
-            controller.write(settings, {'mode': 'mobile', 'failover': True,
+            controller.write(settings, {'mode': 'mobile' if HOOK.exists() else 'direct', 'failover': True,
                 'ssid': uci('wireless.' + hw['station'] + '.ssid', ''),
                 'encryption': uci('wireless.' + hw['station'] + '.encryption', 'none'),
                 'band': uci('wireless.' + hw['radio'] + '.band', '5g')})
         edit_hook()
-        print('Hook installed. Service not started; review hardware.json before enabling.')
+        print('Setup complete; OpenClash hook installed when present. Service not started; review hardware.json before enabling.')
     elif action == 'cleanup':
         subprocess.run(['/etc/init.d/wifi-data-switch', 'stop'], check=False)
         subprocess.run(['/etc/init.d/wifi-data-switch', 'disable'], check=False)

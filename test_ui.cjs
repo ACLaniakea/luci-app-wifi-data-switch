@@ -35,9 +35,10 @@ async function test() {
   const deviceLabel = walk(dom).find(v => v.tag === 'label' && text(v).includes('test-pc'));
   deviceLabel.children[0].checked = true; deviceLabel.children[0].attrs.change();
   assert.match(text(dom), /直连 → Wi-Fi/);
-  assert.match(text(dom), /OpenClash 代理 → 移动数据/);
+  assert.match(text(dom), /代理 → 移动数据/);
   assert.match(text(dom), /全部走 Wi-Fi/);
   assert.match(text(dom), /全部走移动数据/);
+  assert.equal(walk(dom).filter(v => v.tag === 'option' && text(v) === '仅双网加速（无代理）').length, 1);
   assert.match(text(dom), /加速移动流量/);
   assert.match(text(dom), /Wi-Fi 总用量/);
   assert.match(text(dom), /移动总用量/);
@@ -67,6 +68,10 @@ async function test() {
   await polls[0]();
   assert.match(text(dom), /直连 → 移动数据/);
   assert.match(text(dom), /待认证或联网检测中/);
+  state.mode = 'direct'; state.native_mode = true; state.proxy = 'none';
+  await polls[0]();
+  assert.match(text(dom), /代理 → 已停用/);
+  assert.match(text(dom), /无代理模式正在使用备用出口/);
   console.log('UI rendering, settings submission and live failover status passed.');
 }
 test().catch(error => { console.error(error); process.exitCode = 1; });

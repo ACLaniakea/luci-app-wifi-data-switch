@@ -74,6 +74,12 @@ class BackendTest(unittest.TestCase):
 
 
 class HookTest(unittest.TestCase):
+    def test_missing_openclash_does_not_prevent_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hook = pathlib.Path(directory) / 'missing-hook.sh'
+            with mock.patch.object(maintenance, 'HOOK', hook):
+                maintenance.edit_hook()
+            self.assertFalse(hook.exists())
     def test_install_is_idempotent_and_remove_preserves_existing_hook(self):
         original = '#!/bin/sh\n# user rules\necho custom\nexit 0\n'
         with tempfile.TemporaryDirectory() as directory:
