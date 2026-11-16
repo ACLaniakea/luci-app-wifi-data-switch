@@ -49,11 +49,12 @@ def main():
         subprocess.run(['/etc/init.d/wifi-data-switch', 'stop'], check=False)
         subprocess.run(['/etc/init.d/wifi-data-switch', 'disable'], check=False)
         edit_hook(remove=True)
-        for priority in (10510, 10511, 10512, 10520, 10521, 31020):
+        for priority in (10510, 10511, 10512, 10513, 10520, 10521, 31020):
             controller.rule(priority, [], False)
         for table in ('201', '202'):
             controller.command(['ip', '-4', 'route', 'flush', 'table', table], check=False)
         controller.command(['nft', 'delete', 'table', 'inet', 'wifi_data_switch'], check=False)
+        controller.command(['nft','delete','table','inet','wds_meter'],check=False)
         print('Routing and hook removed. Refresh your original OpenClash subscription/configuration before restarting OpenClash; see README rollback instructions.')
     else:
         raise SystemExit('Usage: maintenance.py setup|cleanup')

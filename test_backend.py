@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0,str(__import__('pathlib').Path(__file__).parent/'files/usr/libexec/wifi-data-switch'))
 import importlib.util
 import json
 import pathlib

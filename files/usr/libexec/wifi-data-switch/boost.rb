@@ -11,7 +11,7 @@ module WifiDataBoost
     key=PREFIX+'SCOPE'
     raise 'Reserved sub-rule name collision' if data.fetch('sub-rules',{}).key?(key)
     data['proxies'] ||= []
-    [['WIFI',hw.fetch('wifi_device','wlan-sta'),22354],['MOBILE',hw.fetch('mobile_device','sipa_eth0'),22353]].each do |label,iface,mark|
+    [['WIFI',hw.fetch('wifi_device','wlan-sta'),22354],['MOBILE',hw.fetch('mobile_device','sipa_eth0'),22355]].each do |label,iface,mark|
       data['proxies'] << {'name'=>PREFIX+label,'type'=>'direct','udp'=>true,'ip-version'=>'ipv4','interface-name'=>iface,'routing-mark'=>mark}
     end
     data['proxy-groups'] ||= []

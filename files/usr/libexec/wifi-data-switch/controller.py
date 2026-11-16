@@ -6,6 +6,7 @@ Health-gated policy rules select Wi-Fi for DIRECT and bind proxy nodes to the
 other uplink. Wi-Fi keys stay in UCI and are never passed in process arguments.
 """
 import hashlib
+import quota
 import fcntl
 import ipaddress
 import json
@@ -100,6 +101,7 @@ def setup_routes(wifi,cell,active):
         rule(10520,['fwmark',MARK_WIFI,'lookup','202'])
         rule(10521,['oif',wifi['device'],'lookup','202'])
     # Keep OpenClash TPROXY packets on their own routing table.
+    rule(10513,['fwmark','0x5753','lookup','201'])
     rule(31020,['not','fwmark',hardware()['clash_mark'],'lookup','202'],active)
     has_table=command(['nft','list','table','inet','wifi_data_switch'],check=False).returncode==0
     if active and not has_table:
@@ -181,6 +183,7 @@ def status():
         try:info['counters']={k:int(pathlib.Path('/sys/class/net',info['device'],'statistics',k).read_text()) for k in ['rx_bytes','tx_bytes']}
         except (KeyError,OSError,ValueError):info['counters']={}
     s['last_error']=read(RUN/'error.json',{})
+    s['usage']=read(RUN/'usage-status.json',{})
     s['boost']=read(RUN/'boost.json',{'active':False})
     s['last_switch']=read(RUN/'last-switch.json',{})
     return s
@@ -193,7 +196,7 @@ def configure(args):
     key=args.get('wifi_key','')
     if not isinstance(key,str) or any(c in key for c in ('\n','\r','\x00')):raise ValueError('Wi-Fi 密码不能包含换行或空字符。')
     if key and not(8<=len(key)<=63 or len(key)==64 and re.fullmatch('[0-9a-fA-F]+',key)):raise ValueError('Wi-Fi 密码长度不正确。')
-    boost=acceleration(args)
+    boost=acceleration(args);boost.update(quota.limits(args))
     oldssid=command(['uci','-q','get',station+'.ssid'],check=False).stdout.strip();oldenc=command(['uci','-q','get',station+'.encryption'],check=False).stdout.strip()
     if enc!='none' and not key and not command(['uci','-q','get',station+'.key'],check=False).stdout.strip():raise ValueError('请填写无线密码。')
     oldband=command(['uci','-q','get',radio+'.band'],check=False).stdout.strip()
@@ -217,6 +220,7 @@ def configure(args):
 def daemon():
     ensure_dirs();lock=open(RUN/'daemon.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     scores={'wifi':{'good':0,'bad':0,'online':False},'mobile':{'good':0,'bad':0,'online':False}}
+    meter=quota.Meter(sys.modules[__name__])
     running=True;last_selection=None
     def stop(*_):
         nonlocal running
@@ -233,7 +237,14 @@ def daemon():
                 w=scores['wifi']['online'];c=scores['mobile']['online']
                 direct_wifi,proxy_wifi=choose_uplinks(cfg,w,c)
                 device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
+                try:
+                    usage=meter.sample(cfg)
+                except Exception:
+                    usage={'ready':False,'exceeded':True}
+                    write(RUN/'usage-status.json',usage)
                 boost=boost_runtime(cfg,w,c)
+                boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流模式' if cfg['mode']!='split' else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到流量额度' if usage['exceeded'] else '双网加速已就绪'))))
+                boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
                 if read(RUN/'boost.json',{})!=boost:write(RUN/'boost.json',boost)
                 clash_ok=bind_clash(device)
                 # Never send DIRECT to Wi-Fi before proxy binding is confirmed.
@@ -259,11 +270,12 @@ def daemon():
                 if not running:break
                 time.sleep(1)
     finally:
+        meter.flush()
         rule(31020,[],False)
         command(['nft','delete','table','inet','wifi_data_switch'],check=False)
         # Keep explicit bound-uplink routes for already established sockets.
         write(RUN/'status.json',{'ready':False,'direct':'mobile','proxy':'mobile','wifi_direct':False})
-METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String'},'scan':{}}
+METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String'},'scan':{}}
 def main():
     ensure_dirs()
     if len(sys.argv)>1 and sys.argv[1]=='daemon':daemon();return
