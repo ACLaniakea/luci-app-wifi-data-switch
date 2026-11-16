@@ -140,7 +140,7 @@ return view.extend({
         var noticeKey = 'wifi-data-switch-f50-notice-v1', acknowledged = false;
         try { acknowledged = localStorage.getItem(noticeKey) === 'yes'; } catch (_) {}
         if (!acknowledged && ui.showModal) ui.showModal('使用前确认', [E('p', {}, ['目前仅在 F50 上测试。']), E('p', {}, [noticeText]), button('知道了', function() { try { localStorage.setItem(noticeKey, 'yes'); } catch (_) {} ui.hideModal(); }, true)]);
-        return E('div', {'class':'wds-app'}, [E('link', {rel:'stylesheet', href:L.resource('view/wifi-data-switch/settings.css') + '?v=070'}), E('div', {'class':'wds-header'}, [E('h2', {}, ['Wi-Fi / 数据切换']), E('span', {'class':'wds-muted'}, ['F50'])]), navigation,
+        return E('div', {'class':'wds-app'}, [E('link', {rel:'stylesheet', href:L.resource('view/wifi-data-switch/settings.css') + '?v=071-theme'}), E('div', {'class':'wds-header'}, [E('h2', {}, ['Wi-Fi / 数据切换']), E('span', {'class':'wds-muted'}, ['F50'])]), navigation,
             E('div', {'class':'wds-content'}, [overview, settings, accelerationPanel, quotaPanel]), E('details', {'class':'wds-details wds-notice'}, [E('summary', {}, ['使用须知']), E('p', {}, [noticeText])]), actions]);
     }
 });
