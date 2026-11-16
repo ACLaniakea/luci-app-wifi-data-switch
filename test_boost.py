@@ -20,3 +20,8 @@ class BoostTest(unittest.TestCase):
         self.assertEqual(cfg['boost_device_mode'],'all')
         cfg=controller.acceleration({'boost_enabled':'true','boost_device_mode':'blacklist','boost_domains':'example.com'})
         self.assertEqual(cfg['boost_device_mode'],'blacklist')
+
+    def test_legacy_strategy_always_uses_round_robin(self):
+        cfg=controller.acceleration({'boost_strategy':'sticky-sessions'})
+        self.assertEqual(cfg['boost_strategy'],'round-robin')
+        self.assertEqual(controller.boost_runtime({'mode':'split','boost_enabled':True,'boost_strategy':'sticky-sessions'},True,True)['strategy'],'round-robin')

@@ -37,3 +37,8 @@ puts 'Boost rule scope and restore checks passed'
   check(cfg['rules']==original['rules'])
 end
 puts 'All devices, whitelist and blacklist domain gates passed'
+
+legacy=Marshal.load(Marshal.dump(original))
+WifiDataBoost.apply(legacy,runtime.merge('strategy'=>'sticky-sessions'),{})
+check(legacy['proxy-groups'].find { |g| g['name']=='WDS-BOOST-POOL' }['strategy']=='round-robin')
+puts 'Legacy sticky setting normalized to round-robin'

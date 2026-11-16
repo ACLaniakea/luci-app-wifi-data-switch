@@ -110,8 +110,6 @@ return view.extend({
             });
         }, false);
         var boostEnabled = E('input', { type: 'checkbox' }); boostEnabled.checked = !!cfg.boost_enabled;
-        var boostStrategy = E('select', { 'class': 'cbi-input-select' }, [E('option', { value: 'sticky-sessions' }, ['稳定优先：同设备同站点固定出口']), E('option', { value: 'round-robin' }, ['吞吐优先：新连接轮流使用双网'])]);
-        boostStrategy.value = cfg.boost_strategy || 'sticky-sessions';
         var boostDevices = E('textarea', { 'class': 'cbi-input-textarea', rows: '3', placeholder: '每行一个设备 IPv4 或网段' }, [cfg.boost_devices || '']); boostDevices.value = cfg.boost_devices || '';
         var recommendedDomains = (initial.recommended_domains || ['download.windowsupdate.com', 'dl.delivery.mp.microsoft.com', 'mirrors.tuna.tsinghua.edu.cn', 'mirrors.ustc.edu.cn']).join('\n');
         var boostDomains = E('textarea', { 'class': 'cbi-input-textarea', rows: '3', placeholder: '每行一个域名，包含其子域名' }, [cfg.boost_domains || recommendedDomains]); boostDomains.value = cfg.boost_domains || recommendedDomains;
@@ -170,8 +168,8 @@ return view.extend({
         var mobileMonthly = quotaInput(cfg.mobile_monthly_mib);
         var billingDay = E('input', { type: 'number', min: '1', max: '28', value: cfg.billing_day || 1 });
         var accelerationPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['加速范围']),
-            row('直连双网加速', boostEnabled, '仅分流模式下生效；只处理指定范围内原本 DIRECT 的 TCP 连接。单连接不叠加带宽。'),
-            row('加速策略', boostStrategy), row('设备范围', devicePicker, '默认全部设备。白名单只允许所选设备，黑名单排除所选设备。列表来自租约和邻居缓存，不保证设备此刻在线。'), row('手动 IP／网段', boostDevices, '可选：用于白名单或黑名单。IP 可能变化，长期使用建议设置静态租约。'), row('加速域名', domainPicker, '只有设备范围和域名同时匹配，且原规则明确走 DIRECT，才参与加速。清空域名不能启用加速。'),
+            row('直连双网加速', boostEnabled, '仅分流模式下生效；只处理指定范围内原本 DIRECT 的 TCP 连接。新连接轮流使用双网，单连接不叠加带宽。'),
+            row('设备范围', devicePicker, '默认全部设备。白名单只允许所选设备，黑名单排除所选设备。列表来自租约和邻居缓存，不保证设备此刻在线。'), row('手动 IP／网段', boostDevices, '可选：用于白名单或黑名单。IP 可能变化，长期使用建议设置静态租约。'), row('加速域名', domainPicker, '只有设备范围和域名同时匹配，且原规则明确走 DIRECT，才参与加速。清空域名不能启用加速。'),
             E('p', {}, ['建议仅填写下载域名。游戏、会议、支付和远程控制设备不要整体加入吞吐优先。'])]);
         var quotaPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['流量限额']), row('每日移动总额度', mobileDaily.widget, '含代理、普通上网和加速；0 表示不限额'), row('每月移动总额度', mobileMonthly.widget, '达到后代理和直连全部走 Wi-Fi，停用移动出口；Wi-Fi 不可用时不会回退到移动数据'), row('每日加速额度', dailyLimit.widget, '0 表示不限额'), row('每月加速额度', monthlyLimit.widget, '只限制额外加速流量，不限制原有代理流量'), row('每月结算日', billingDay, '1–28 日。修改周期不会清空已有用量。'), E('p', {}, ['加速额度到额：停止新移动加速连接，已有连接自然结束。移动总额度到额：全部改走 Wi-Fi，现有移动连接会中断并需重连。'])]);
         var settings = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['出口与无线设置']),
@@ -180,7 +178,7 @@ return view.extend({
             row('无线名称（SSID）', ssid), row('无线频段', band), row('无线加密', encryption), row('无线密码', key),
             row('网络扫描', E('div', {}, [scanButton, scanResult])),
             E('p', {}, ['保存只记录设置；应用后才修改当前网络。'])]);
-        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value), mobileDaily.mib(), mobileMonthly.mib(), deviceMode.value).then(function(r) { if (r.ok) key.value = '';notify(r); }); };
+        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), 'round-robin', boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value), mobileDaily.mib(), mobileMonthly.mib(), deviceMode.value).then(function(r) { if (r.ok) key.value = '';notify(r); }); };
         function actions() { return E('div', { style: 'margin:12px 0' }, [button('保存设置', saveSettings, true), button('应用已保存设置', function() { return api.apply().then(notify); }, false)]); }
         quotaPanel.appendChild(actions());
         accelerationPanel.appendChild(actions());

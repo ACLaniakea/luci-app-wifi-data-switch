@@ -16,7 +16,7 @@ module WifiDataBoost
       data['proxies'] << {'name'=>PREFIX+label,'type'=>'direct','udp'=>true,'ip-version'=>'ipv4','interface-name'=>iface,'routing-mark'=>mark}
     end
     data['proxy-groups'] ||= []
-    data['proxy-groups'] << {'name'=>PREFIX+'POOL','type'=>'load-balance','proxies'=>[PREFIX+'WIFI',PREFIX+'MOBILE'],'strategy'=>runtime.fetch('strategy','sticky-sessions'),'url'=>'http://connectivitycheck.platform.hicloud.com/generate_204','interval'=>60}
+    data['proxy-groups'] << {'name'=>PREFIX+'POOL','type'=>'load-balance','proxies'=>[PREFIX+'WIFI',PREFIX+'MOBILE'],'strategy'=>'round-robin','url'=>'http://connectivitycheck.platform.hicloud.com/generate_204','interval'=>60}
     scope=['NETWORK,UDP,DIRECT','DST-PORT,22,DIRECT','DST-PORT,3389,DIRECT','DST-PORT,47984-48010,DIRECT','DST-PORT,21115-21119,DIRECT']
     ['0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.168.0.0/16','224.0.0.0/4'].each { |net| scope << "IP-CIDR,#{net},DIRECT,no-resolve" }
     domain_rules=domains.map { |domain| "DOMAIN-SUFFIX,#{domain},#{PREFIX}POOL" } + ['MATCH,DIRECT']

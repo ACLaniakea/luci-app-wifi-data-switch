@@ -123,8 +123,9 @@ def clash_info(path):
     return values[:4]
 def acceleration(args):
     enabled=str(args.get('boost_enabled',False)).lower() in ('true','1','yes','on')
-    strategy=args.get('boost_strategy','sticky-sessions')
-    if strategy not in ('sticky-sessions','round-robin'):raise ValueError('无效加速策略')
+    requested=args.get('boost_strategy','round-robin')
+    strategy='round-robin'
+    if requested not in ('sticky-sessions','round-robin'):raise ValueError('无效加速策略')
     def entries(name):
         value=args.get(name,'')
         if not isinstance(value,str) or len(value)>8192:raise ValueError('加速范围格式不正确')
@@ -141,7 +142,7 @@ def acceleration(args):
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
     return {'enabled':enabled,'active':bool(enabled and cfg['mode']=='split' and wifi and mobile),
-            'strategy':cfg.get('boost_strategy','sticky-sessions'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
+            'strategy':'round-robin','device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
     if path is None:return False

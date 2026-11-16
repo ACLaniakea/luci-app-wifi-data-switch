@@ -53,6 +53,8 @@ async function test() {
   await save.attrs.click();
   const config = calls.find(v => v[0] === 'configure');
   assert.equal(config[1][0], 'split');
+  assert.equal(config[1][7], 'round-robin');
+  assert.doesNotMatch(text(dom), /稳定优先/);
   assert.equal(config[1][8], '192.0.2.2');
   assert.equal(config[1][15], 'whitelist');
   assert.match(config[1][9], /download.windowsupdate.com/);
