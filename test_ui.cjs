@@ -27,6 +27,8 @@ async function test() {
   assert.match(text(dom), /全部走 Wi-Fi/);
   assert.match(text(dom), /全部走移动数据/);
   assert.match(text(dom), /加速移动流量/);
+  assert.match(text(dom), /Wi-Fi 总用量/);
+  assert.match(text(dom), /移动总用量/);
   assert.match(text(dom), /日/);
   assert.equal(polls.length, 1);
   const quotaWidget = walk(dom).find(v => v.tag === 'span' && v.children.length === 2 && v.children[1].tag === 'select' && v.children[1].value === '1024');
@@ -39,7 +41,7 @@ async function test() {
   await save.attrs.click();
   const config = calls.find(v => v[0] === 'configure');
   assert.equal(config[1][0], 'split');
-  assert.equal(config[1][10], '1536');
+  assert.equal(config[1][13], '1536');
   assert.equal(config[1][4], 'true');
   assert.equal(config[1][5], '5g');
   assert.equal(calls.some(v => /auth/.test(v[0])), false);

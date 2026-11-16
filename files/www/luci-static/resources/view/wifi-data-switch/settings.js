@@ -5,7 +5,7 @@
 'require ui';
 
 var api = {};
-[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains', 'daily_mib', 'monthly_mib', 'billing_day']],
+[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains', 'daily_mib', 'monthly_mib', 'billing_day', 'mobile_daily_mib', 'mobile_monthly_mib']],
  ['scan', []], ['apply', []]].forEach(function(entry) {
     api[entry[0]] = rpc.declare({ object: 'wifi-data-switch', method: entry[0], params: entry[1], expect: {} });
 });
@@ -59,10 +59,14 @@ return view.extend({
                      '信号：' + (w.signal ? w.signal + ' dBm' : '—') + ' · ' + (w.frequency ? (Number(w.frequency) > 4000 ? '5 GHz' : '2.4 GHz') : '—'), speed('wifi', w)], wh.online),
                 card('移动数据', mh.online ? '已联网' : (m.up ? '蜂窝已连接 · 检测中或网络不可用' : '未连接'),
                     ['地址：' + ((m.addresses || []).join(', ') || '—'), '接口：' + (m.device || '—'), speed('mobile', m)], mh.online));
-            var usage = s.usage || {}, daily = usage.daily || {}, monthly = usage.monthly || {};
+            var usage = s.usage || {}, networks = usage.networks || {}, wifiUsage = networks.wifi || {}, mobileUsage = networks.mobile || {}, daily = usage.daily || {}, monthly = usage.monthly || {};
             function amount(v) { v = Number(v || 0); return v >= 1073741824 ? (v / 1073741824).toFixed(2) + ' GiB' : (v / 1048576).toFixed(1) + ' MiB'; }
             function budget(v) { return amount(v.used) + ' / ' + (v.limit ? amount(v.limit) : '不限额'); }
-            usagePanel.replaceChildren(E('h3', {}, ['加速移动流量']), E('p', {}, ['今日：' + budget(daily)]), E('p', {}, ['本计费周期：' + budget(monthly)]),
+            usagePanel.replaceChildren(E('h3', {}, ['流量用量']),
+                E('p', {}, ['Wi-Fi 总用量 · 今日：' + amount((wifiUsage.daily || {}).used) + ' · 本周期：' + amount((wifiUsage.monthly || {}).used)]),
+                E('p', {}, ['移动总用量 · 今日：' + budget(mobileUsage.daily || {}) + ' · 本周期：' + budget(mobileUsage.monthly || {})]),
+                E('small', {}, [mobileUsage.started_at ? '总量统计开始于 ' + new Date(mobileUsage.started_at * 1000).toLocaleString() + '；此前用量未计入。' : '总量统计初始化中。']),
+                E('h4', {}, ['加速移动流量（独立统计）']), E('p', {}, ['今日：' + budget(daily)]), E('p', {}, ['本计费周期：' + budget(monthly)]),
                 E('p', {}, [usage.ready ? (usage.exceeded ? '已达额度，新加速连接改走 Wi-Fi。' : (daily.warning || monthly.warning ? '用量已达额度的 80%。' : '只统计双网加速使用的移动流量，含上传和下载。')) : '流量计量等待就绪；此时暂停双网加速。']),
                 E('small', {}, ['路由器估算，非运营商账单。约每轮检测更新、每分钟保存；突然断电可能少计最后一分钟。跨日连接按采样时刻归属。']));
             var savedMode = s.mode || (s.settings || {}).mode;
@@ -127,19 +131,21 @@ return view.extend({
         }
         var dailyLimit = quotaInput(cfg.daily_mib);
         var monthlyLimit = quotaInput(cfg.monthly_mib);
+        var mobileDaily = quotaInput(cfg.mobile_daily_mib);
+        var mobileMonthly = quotaInput(cfg.mobile_monthly_mib);
         var billingDay = E('input', { type: 'number', min: '1', max: '28', value: cfg.billing_day || 1 });
         var accelerationPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['加速范围']),
             row('直连双网加速', boostEnabled, '仅分流模式下生效；只处理指定范围内原本 DIRECT 的 TCP 连接。单连接不叠加带宽。'),
             row('加速策略', boostStrategy), row('加速设备', boostDevices), row('加速域名', boostDomains, '设备与域名为任选其一匹配；建议先仅填写下载域名。UDP、内网、SSH、远程桌面保留原出口。'),
             E('p', {}, ['建议仅填写下载域名。游戏、会议、支付和远程控制设备不要整体加入吞吐优先。'])]);
-        var quotaPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['流量限额']), row('每日加速额度', dailyLimit.widget, '0 表示不限额'), row('每月加速额度', monthlyLimit.widget, '只限制额外加速流量，不限制原有代理流量'), row('每月结算日', billingDay, '1–28 日。修改周期不会清空已有用量。'), E('p', {}, ['达到任一额度后停止为新连接分配移动出口；已有连接自然结束，可能继续产生流量。'])]);
+        var quotaPanel = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['流量限额']), row('每日移动总额度', mobileDaily.widget, '含代理、普通上网和加速；0 表示不限额'), row('每月移动总额度', mobileMonthly.widget, '达到后暂停额外加速，原有代理和上网继续使用移动数据，不会断网；这不是运营商硬限额'), row('每日加速额度', dailyLimit.widget, '0 表示不限额'), row('每月加速额度', monthlyLimit.widget, '只限制额外加速流量，不限制原有代理流量'), row('每月结算日', billingDay, '1–28 日。修改周期不会清空已有用量。'), E('p', {}, ['达到任一额度后停止为新连接分配移动出口；已有连接自然结束，可能继续产生流量。'])]);
         var settings = E('div', { 'class': 'cbi-section' }, [E('h3', {}, ['出口与无线设置']),
             row('上网模式', mode, '分流模式遵循 OpenClash 当前规则：DIRECT 使用 Wi-Fi，代理节点使用移动数据。'),
             row('自动故障转移', failover, '任一出口不可用时使用另一条；原出口连续检测恢复后自动回切。'),
             row('无线名称（SSID）', ssid), row('无线频段', band), row('无线加密', encryption), row('无线密码', key),
             row('网络扫描', E('div', {}, [scanButton, scanResult])),
             E('p', {}, ['保存只记录设置；应用后才修改当前网络。'])]);
-        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value)).then(function(r) { if (r.ok) key.value = '';notify(r); }); };
+        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), boostStrategy.value, boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value), mobileDaily.mib(), mobileMonthly.mib()).then(function(r) { if (r.ok) key.value = '';notify(r); }); };
         function actions() { return E('div', { style: 'margin:12px 0' }, [button('保存设置', saveSettings, true), button('应用已保存设置', function() { return api.apply().then(notify); }, false)]); }
         quotaPanel.appendChild(actions());
         accelerationPanel.appendChild(actions());

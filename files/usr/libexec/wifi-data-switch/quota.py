@@ -3,7 +3,7 @@ import datetime,json,time
 
 def limits(args):
     out={}
-    for key in ('daily_mib','monthly_mib','billing_day'):
+    for key in ('daily_mib','monthly_mib','billing_day','mobile_daily_mib','mobile_monthly_mib'):
         try:value=int(args.get(key,1 if key=='billing_day' else 0))
         except (ValueError,TypeError):raise ValueError('额度和结算日须为整数')
         if not (1<=value<=28 if key=='billing_day' else 0<=value<=100000000):raise ValueError('额度或结算日超出范围')
@@ -34,6 +34,20 @@ def summary(state,cfg):
         out[name]={'period':key,'used':used,'limit':cap,'warning':bool(cap and used>=cap*.8)}
     out['exceeded']=any(v['limit'] and v['used']>=v['limit'] for v in out.values())
     return out
+def network_sample(state,raw,boot,device,now,day):
+    # Start with a baseline, never attribute all pre-install interface bytes to today.
+    if not state or state.get('device')!=device:
+        state.update(raw=dict(raw),boot=boot,device=device,started_at=state.get('started_at',int(now)))
+    return accumulate(state,raw,boot,now,day)
+
+def overall_summary(state,cfg,label):
+    caps={'billing_day':cfg.get('billing_day',1)}
+    if label=='mobile':
+        caps.update(daily_mib=cfg.get('mobile_daily_mib',0),monthly_mib=cfg.get('mobile_monthly_mib',0))
+    out=summary(state,caps)
+    out.update(started_at=state.get('started_at'),ready=True)
+    return out
+
 class Meter:
     def __init__(self,c):self.c=c;self.state=c.read(c.ROOT/'usage.json',{});self.saved=0
     def install(self):
@@ -52,6 +66,17 @@ class Meter:
         boot=c.pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         now=time.time();self.state=accumulate(self.state,raw,boot,now,cfg.get('billing_day',1))
         result=summary(self.state,cfg);result.update(ready=True,sampled_at=int(now))
+        hw=c.hardware() if hasattr(c,'hardware') else {'wifi_network':'wwan','mobile_network':'wan','wifi_device':'wlan-sta','mobile_device':'sipa_eth0'}
+        networks=self.state.setdefault('networks',{});result['networks']={}
+        for label in ('wifi','mobile'):
+            info=c.iface(hw[label+'_network']);device=info.get('device') or hw[label+'_device']
+            netraw={k:int(c.pathlib.Path('/sys/class/net',device,'statistics',v).read_text()) for k,v in [('up','tx_bytes'),('down','rx_bytes')]}
+            entry=networks.setdefault(label,{})
+            network_sample(entry,netraw,boot,device,now,cfg.get('billing_day',1))
+            result['networks'][label]=overall_summary(entry,cfg,label)
+        result['acceleration_exceeded']=result['exceeded']
+        result['mobile_total_exceeded']=result['networks']['mobile']['exceeded']
+        result['exceeded']=bool(result['exceeded'] or result['mobile_total_exceeded'])
         c.write(c.RUN/'usage-status.json',result)
         if now-self.saved>=60:self.flush();self.saved=now
         return result

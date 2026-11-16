@@ -23,3 +23,26 @@ class QuotaTest(unittest.TestCase):
  def test_invalid_limits(self):
   for a in [{'daily_mib':-1},{'billing_day':29},{'monthly_mib':'abc'}]:
    with self.assertRaises(ValueError):quota.limits(a)
+
+class NetworkTotalsTest(unittest.TestCase):
+ def test_first_sample_baselines_preinstall_bytes(self):
+  now=datetime.datetime(2026,11,16,12).timestamp();s={}
+  quota.network_sample(s,{'up':1000000,'down':2000000},'boot','cell',now,1)
+  self.assertEqual(quota.overall_summary(s,{},'mobile')['daily']['used'],0)
+  quota.network_sample(s,{'up':1000100,'down':2000900},'boot','cell',now,1)
+  self.assertEqual(quota.overall_summary(s,{},'mobile')['daily']['used'],1000)
+ def test_total_cap_and_reboot_resume(self):
+  now=datetime.datetime(2026,11,16,12).timestamp();s={}
+  quota.network_sample(s,{'up':10,'down':20},'old','cell',now,1)
+  quota.network_sample(s,{'up':10,'down':2097172},'old','cell',now,1)
+  self.assertTrue(quota.overall_summary(s,{'mobile_daily_mib':1},'mobile')['exceeded'])
+  self.assertFalse(quota.overall_summary(s,{'mobile_daily_mib':1},'wifi')['exceeded'])
+  import json;s=json.loads(json.dumps(s))
+  quota.network_sample(s,{'up':100,'down':100},'new','cell',now,1)
+  self.assertEqual(quota.overall_summary(s,{},'mobile')['daily']['used'],2097352)
+ def test_device_change_does_not_duplicate_counter(self):
+  now=datetime.datetime(2026,11,16,12).timestamp();s={}
+  quota.network_sample(s,{'up':100,'down':200},'boot','cell',now,1)
+  quota.network_sample(s,{'up':200,'down':300},'boot','cell',now,1)
+  quota.network_sample(s,{'up':999999,'down':999999},'boot','newcell',now,1)
+  self.assertEqual(quota.overall_summary(s,{},'mobile')['daily']['used'],200)
