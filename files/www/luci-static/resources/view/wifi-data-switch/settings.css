@@ -91,3 +91,8 @@
 .wds-app :is(input,textarea)::placeholder{color:var(--wds-muted);opacity:1}
 .wds-app select option{background:var(--wds-control);color:var(--wds-text)}
 .wds-app .wds-details,.wds-app .wds-muted,.wds-app .wds-help{color:var(--wds-muted)}
+
+.wds-section-intro{font-size:13px;color:var(--wds-muted);margin:0 0 18px!important;line-height:1.7}
+.wds-panel>.wds-muted{margin-bottom:20px;line-height:1.7}
+
+.wds-app .wds-quota-input select{min-width:84px!important;max-width:94px!important;width:94px!important;flex:0 0 94px}
