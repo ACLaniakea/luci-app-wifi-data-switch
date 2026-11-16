@@ -178,7 +178,7 @@ MIT，详见 [LICENSE](LICENSE)。本仓库不包含 OpenClash/Mihomo，其代�
 
 ## 0.2.0：指定范围的直连双网加速
 
-在分流模式下开启「直连双网加速」，填写设备 IPv4/网段或域名。两种范围是并集；建议先仅填写下载域名。两条出口必须同时通过健康检测，否则恢复原来的单出口与故障转移。
+在分流模式下开启「直连双网加速」，填写设备 IPv4/网段或域名。0.5.0 起设备范围与域名同时匹配才加速，设备模式默认为全部设备。两条出口必须同时通过健康检测，否则恢复原来的单出口与故障转移。
 
 仅将原配置中明确以 DIRECT 为目标的简单规则接入范围子规则，保留规则顺序和代理目标。手动选择 DIRECT 的代理组、复杂逻辑规则和未经过 Mihomo 的绕行流量不在首版支持范围内。只加速 TCP；UDP、私网、SSH、RDP、Sunshine 和 RustDesk 常用端口保留原出口。自定义远程端口不保证自动识别，勿把相关设备整体纳入吞吐优先。
 
@@ -223,3 +223,21 @@ F50 实测分别通过 wlan-sta 和 sipa_eth0 下载 1 MiB：两个总计数都�
 该策略仍以路由器周期采样计数为依据，检测间隔内可能超额，也无法控制本插件外的蜂窝调制解调器自身流量。不是运营商账单硬保证。停止监测后不会自动解除已经触发的总额度，需要重新启动插件并应用额度设置，或执行 cleanup。
 
 F50 测试：完整 IPv4/IPv6 guard 的 nft 语法检查通过；将同一规则限定到一个测试下载 IP 后，移动下载被阻断、Wi-Fi 成功，删除临时规则后移动恢复。该测试避免实际切断生产移动连接；模式优先级与 Wi-Fi 故障不回退由单元测试覆盖。
+
+## 0.5.0：设备选择与推荐下载清单
+
+设备范围支持「全部设备」（默认）、「仅选中设备／白名单」、「排除选中设备／黑名单」。列表默认折叠，标题显示模式、所选项数和设备记录数；展开后使用自适应卡片显示名称、IP、MAC 与最近通信/租约/缓存状态。可勾选或手动填写 IP/网段，未知或离线记录不自动删除已保存的选择。列表来自 F50 的 DHCP 租约和 LAN 邻居缓存，不主动扫描，不能保证设备此刻在线。按 IP 匹配，地址改变需刷新选择，长期固定策略建议静态租约。
+
+设备范围和下载域名必须同时匹配，原 OpenClash 规则还必须明确选择 DIRECT。白名单中非所选设备不加速；黑名单排除先于域名匹配。旧版填写过 IP 而没有设备模式时按白名单展示。UDP、内网、远程端口保护不变。
+
+域名框为空时显示推荐清单，可编辑；只有一个「恢复默认」按钮，替换表单为完整推荐清单，仍需保存并应用。已有非空清单不被覆盖。不会自动开启加速。默认包含 22 个下载端点，见 [推荐下载域名](examples/recommended-download-domains.txt)：Windows 更新、开源镜像、Steam、Epic、米哈游国服和国际服（原神、崩坏：星穹铁道、绝区零、崩坏3）。没有加入整个游戏平台、账号或支付父域名。
+
+来源与边界：
+
+- [Microsoft 更新端点](https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/windows-update-issues-troubleshooting) 支持更新下载端点。
+- [Epic 官方网络端点](https://www.epicgames.com/help/c-36624475/c-35761596/which-domains-need-to-be-whitelisted-to-reach-the-epic-servers-a15422130?lang=en-US) 与 [LanCache 维护者的下载清单](https://github.com/uklans/cache-domains/blob/master/epicgames.txt) 支持 Epic 下载端点。
+- Steam 的 steamcontent.com 下载用途由本机 Steam content_log 的内容服务器记录核对，不把整个 steampowered.com 纳入。
+- 米哈游域名于 2026-11-16 从官方公开启动器接口 `hyp-api.mihoyo.com/hyp/hyp-connect/api/getGamePackages?launcher_id=jGHBHlcOq1` 与 `sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/getGamePackages?launcher_id=VYTpXlbWo8` 返回的资源 URL 核对。国际服资源若原规则走代理，仍走代理，不强制直连。
+- 清华和中科大镜像用途见 [清华镜像站](https://mirrors.tuna.tsinghua.edu.cn/) 与 [中科大镜像说明](https://lug.ustc.edu.cn/wiki/lug/services/mirrors/)。
+
+这些是下载用途推荐，不保证每个游戏、每个版本的多出口下载性能；新增 CDN 可能需要补充。下载器的连接数量及上下游瓶颈决定实际收益。

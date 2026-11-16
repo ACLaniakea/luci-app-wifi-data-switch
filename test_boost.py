@@ -13,3 +13,10 @@ class BoostTest(unittest.TestCase):
         cfg['mode']='wifi';self.assertFalse(controller.boost_runtime(cfg,True,True)['active'])
     def test_default_disabled(self):
         self.assertFalse(controller.boost_runtime({'mode':'split'},True,True)['active'])
+
+    def test_whitelist_requires_device_and_domain(self):
+        with self.assertRaises(ValueError):controller.acceleration({'boost_enabled':'true','boost_device_mode':'whitelist','boost_domains':'example.com'})
+        cfg=controller.acceleration({'boost_enabled':'true','boost_domains':'example.com'})
+        self.assertEqual(cfg['boost_device_mode'],'all')
+        cfg=controller.acceleration({'boost_enabled':'true','boost_device_mode':'blacklist','boost_domains':'example.com'})
+        self.assertEqual(cfg['boost_device_mode'],'blacklist')

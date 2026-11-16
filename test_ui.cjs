@@ -16,12 +16,24 @@ const state = { ready: true, mode: 'split', direct: 'wifi', proxy: 'mobile', cla
   wifi: { up: true, addresses: ['192.0.2.2'], signal: '-55', frequency: '5220', counters: {} },
   mobile: { up: true, device: 'sipa_eth0', addresses: ['198.51.100.2'], counters: {} } };
 const calls = [], polls = [];
-const rpc = { declare(spec) { return (...args) => { calls.push([spec.method, args]); return Promise.resolve(spec.method === 'status' ? state : { ok: true, message: 'ok' }); }; } };
+const rpc = { declare(spec) { return (...args) => { calls.push([spec.method, args]); return Promise.resolve(spec.method === 'status' ? state : (spec.method === 'devices' ? {devices:[{ip:'192.0.2.2',name:'test-pc',mac:'00:11:22:33:44:55',state:'recent'}]} : { ok: true, message: 'ok' })); }; } };
 const source = fs.readFileSync(path.join(__dirname, 'files/www/luci-static/resources/view/wifi-data-switch/settings.js'), 'utf8');
 const page = new Function('view', 'rpc', 'poll', 'ui', 'E', source)({ extend(v) { return v; } }, rpc,
   { add(fn) { polls.push(fn); } }, { addNotification() {} }, E);
 async function test() {
   const dom = page.render(state);
+  await Promise.resolve();
+  const picker = walk(dom).find(v => v.tag === 'details' && v.attrs.class === 'wds-device-picker');
+  assert.ok(picker);assert.equal(picker.attrs.open, undefined);
+  const restore = walk(dom).filter(v => v.tag === 'button' && text(v) === '恢复默认');
+  assert.equal(restore.length, 1);
+  await restore[0].attrs.click();
+  assert.equal(walk(dom).some(v => v.tag === 'button' && text(v).startsWith('追加')), false);
+  const deviceMode = walk(dom).find(v => v.tag === 'select' && text(v).includes('白名单'));
+  assert.equal(deviceMode.value, 'all');
+  deviceMode.value = 'whitelist'; deviceMode.attrs.change();
+  const deviceLabel = walk(dom).find(v => v.tag === 'label' && text(v).includes('test-pc'));
+  deviceLabel.children[0].checked = true; deviceLabel.children[0].attrs.change();
   assert.match(text(dom), /直连 → Wi-Fi/);
   assert.match(text(dom), /OpenClash 代理 → 移动数据/);
   assert.match(text(dom), /全部走 Wi-Fi/);
@@ -41,6 +53,9 @@ async function test() {
   await save.attrs.click();
   const config = calls.find(v => v[0] === 'configure');
   assert.equal(config[1][0], 'split');
+  assert.equal(config[1][8], '192.0.2.2');
+  assert.equal(config[1][15], 'whitelist');
+  assert.match(config[1][9], /download.windowsupdate.com/);
   assert.equal(config[1][13], '1536');
   assert.equal(config[1][4], 'true');
   assert.equal(config[1][5], '5g');

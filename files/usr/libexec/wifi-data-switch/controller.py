@@ -5,6 +5,7 @@ No default route, modem attach state, LAN address or DHCP topology is changed.
 Health-gated policy rules select Wi-Fi for DIRECT and bind proxy nodes to the
 other uplink. Wi-Fi keys stay in UCI and are never passed in process arguments.
 """
+import lan_devices
 import hashlib
 import quota
 import fcntl
@@ -123,21 +124,24 @@ def clash_info(path):
 def acceleration(args):
     enabled=str(args.get('boost_enabled',False)).lower() in ('true','1','yes','on')
     strategy=args.get('boost_strategy','sticky-sessions')
-    if strategy not in ('sticky-sessions','round-robin'):raise ValueError('Invalid boost strategy')
+    if strategy not in ('sticky-sessions','round-robin'):raise ValueError('无效加速策略')
     def entries(name):
         value=args.get(name,'')
-        if not isinstance(value,str) or len(value)>8192:raise ValueError('Invalid boost scope')
+        if not isinstance(value,str) or len(value)>8192:raise ValueError('加速范围格式不正确')
         return list(dict.fromkeys(v for v in re.split(r'[\s,]+',value.strip()) if v))
     devices=entries('boost_devices');domains=entries('boost_domains')
+    mode=args.get('boost_device_mode','whitelist' if devices else 'all')
+    if mode not in ('all','whitelist','blacklist'):raise ValueError('无效设备范围')
     for v in devices:ipaddress.IPv4Network(v,strict=False)
     for v in domains:
-        if len(v)>253 or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?',v):raise ValueError('Invalid boost domain')
-    if enabled and not (devices or domains):raise ValueError('Select a device IP or domain before enabling boost')
-    return {'boost_enabled':enabled,'boost_strategy':strategy,'boost_devices':'\n'.join(devices),'boost_domains':'\n'.join(v.lower() for v in domains)}
+        if len(v)>253 or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?',v):raise ValueError('域名格式不正确')
+    if enabled and not domains:raise ValueError('开启加速前请填写下载域名')
+    if enabled and mode=='whitelist' and not devices:raise ValueError('请选择至少一台加速设备')
+    return {'boost_enabled':enabled,'boost_strategy':strategy,'boost_device_mode':mode,'boost_devices':'\n'.join(devices),'boost_domains':'\n'.join(v.lower() for v in domains)}
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
     return {'enabled':enabled,'active':bool(enabled and cfg['mode']=='split' and wifi and mobile),
-            'strategy':cfg.get('boost_strategy','sticky-sessions'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
+            'strategy':cfg.get('boost_strategy','sticky-sessions'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
     if path is None:return False
@@ -185,6 +189,9 @@ def status():
         try:info['counters']={k:int(pathlib.Path('/sys/class/net',info['device'],'statistics',k).read_text()) for k in ['rx_bytes','tx_bytes']}
         except (KeyError,OSError,ValueError):info['counters']={}
     s['last_error']=read(RUN/'error.json',{})
+    s['recommended_domains']=lan_devices.RECOMMENDED_DOMAINS
+    s['download_groups']=lan_devices.DOWNLOAD_GROUPS
+    s['download_groups']=lan_devices.DOWNLOAD_GROUPS
     s['usage']=read(RUN/'usage-status.json',{})
     s['boost']=read(RUN/'boost.json',{'active':False})
     s['last_switch']=read(RUN/'last-switch.json',{})
@@ -287,7 +294,7 @@ def daemon():
         command(['nft','delete','table','inet','wifi_data_switch'],check=False)
         # Keep explicit bound-uplink routes for already established sockets.
         write(RUN/'status.json',{'ready':False,'direct':'wifi' if blocked else 'mobile','proxy':'wifi' if blocked else 'mobile','wifi_direct':bool(blocked),'mobile_blocked':bool(blocked)})
-METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String'},'scan':{},'apply':{}}
+METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String','boost_device_mode':'String'},'scan':{},'devices':{},'apply':{}}
 def main():
     ensure_dirs()
     if len(sys.argv)>1 and sys.argv[1]=='daemon':daemon();return
@@ -302,6 +309,7 @@ def main():
         else:
             result=configure(draft,apply=True)
             (ROOT/'pending.json').unlink(missing_ok=True)
+    elif method=='devices':result=lan_devices.devices(sys.modules[__name__])
     elif method=='scan':
         result=json.loads(command(['ubus','call','iwinfo','scan',json.dumps({'device':hardware()['wifi_device']})],timeout=20).stdout)
     else:raise ValueError('Unknown method')

@@ -21,7 +21,7 @@ spec.loader.exec_module(maintenance)
 
 class BackendTest(unittest.TestCase):
     def test_public_rpc_surface_has_no_portal_actions(self):
-        self.assertEqual(set(controller.METHODS), {'status', 'scan', 'configure', 'apply'})
+        self.assertEqual(set(controller.METHODS), {'status', 'scan', 'configure', 'apply', 'devices'})
         acl = json.loads((BASE.parents[1] / 'share/rpcd/acl.d/luci-app-wifi-data-switch.json').read_text())
         entry = acl['luci-app-wifi-data-switch']
         self.assertEqual(entry['write']['ubus']['wifi-data-switch'], ['configure', 'apply'])

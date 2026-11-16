@@ -5,7 +5,7 @@
       "ubus": {
         "wifi-data-switch": [
           "status",
-          "scan"
+          "scan", "devices"
         ]
       }
     },
