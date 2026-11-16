@@ -46,3 +46,11 @@ class NetworkTotalsTest(unittest.TestCase):
   quota.network_sample(s,{'up':200,'down':300},'boot','cell',now,1)
   quota.network_sample(s,{'up':999999,'down':999999},'boot','newcell',now,1)
   self.assertEqual(quota.overall_summary(s,{},'mobile')['daily']['used'],200)
+
+class QuotaPolicyTest(unittest.TestCase):
+ def test_total_cap_overrides_manual_mobile_and_failover(self):
+  for mode in ['split','mobile','wifi']:
+   for wifi in [True,False]:
+    self.assertEqual(quota.select_policy({'mode':mode},wifi,True,{'mobile_total_exceeded':True},lambda *args:(False,False)),(True,True))
+ def test_acceleration_cap_keeps_original_proxy_policy(self):
+  self.assertEqual(quota.select_policy({'mode':'split'},True,True,{'exceeded':True,'mobile_total_exceeded':False},lambda *args:(True,False)),(True,False))

@@ -48,6 +48,18 @@ def overall_summary(state,cfg,label):
     out.update(started_at=state.get('started_at'),ready=True)
     return out
 
+def select_policy(cfg,wifi,mobile,usage,choose):
+    if usage.get('mobile_total_exceeded'):return True,True
+    return choose(cfg,wifi,mobile)
+
+def guard_script(device):
+    return ('table inet wds_mobile_limit {\n chain tx {\n type filter hook output priority -5; policy accept;\n oifname '+json.dumps(device)+' reject with icmpx type admin-prohibited;\n }\n chain transit {\n type filter hook forward priority -5; policy accept;\n oifname '+json.dumps(device)+' reject with icmpx type admin-prohibited;\n }\n}\n')
+
+def mobile_guard(c,device,blocked):
+    exists=c.command(['nft','list','table','inet','wds_mobile_limit'],check=False).returncode==0
+    if blocked and not exists:c.command(['nft','-f','-'],input=guard_script(device))
+    if not blocked and exists:c.command(['nft','delete','table','inet','wds_mobile_limit'])
+
 class Meter:
     def __init__(self,c):self.c=c;self.state=c.read(c.ROOT/'usage.json',{});self.saved=0
     def install(self):

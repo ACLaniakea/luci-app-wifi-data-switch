@@ -242,22 +242,24 @@ def daemon():
                     success=bool(info['up'] and probe(info['device']));s=scores[label]
                     health_sample(s,success,info['up'])
                 w=scores['wifi']['online'];c=scores['mobile']['online']
-                direct_wifi,proxy_wifi=choose_uplinks(cfg,w,c)
-                device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
                 try:
                     usage=meter.sample(cfg)
                 except Exception:
-                    usage={'ready':False,'exceeded':True}
+                    usage={'ready':False,'exceeded':True,'mobile_total_exceeded':read(RUN/'usage-status.json',{}).get('mobile_total_exceeded',False)}
                     write(RUN/'usage-status.json',usage)
+                total_blocked=bool(usage.get('mobile_total_exceeded'))
+                quota.mobile_guard(sys.modules[__name__],hw['mobile_device'],total_blocked)
+                direct_wifi,proxy_wifi=quota.select_policy(cfg,w,c,usage,choose_uplinks)
+                device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
                 boost=boost_runtime(cfg,w,c)
                 boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流模式' if cfg['mode']!='split' else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到移动总流量额度' if usage.get('mobile_total_exceeded') else '已达到加速流量额度' if usage['exceeded'] else '双网加速已就绪'))))
                 boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
                 if read(RUN/'boost.json',{})!=boost:write(RUN/'boost.json',boost)
                 clash_ok=bind_clash(device)
                 # Never send DIRECT to Wi-Fi before proxy binding is confirmed.
-                use_wifi=bool(direct_wifi and clash_ok)
+                use_wifi=bool(total_blocked or direct_wifi and clash_ok)
                 setup_routes(wifi,cell,use_wifi)
-                selection=('wifi' if use_wifi else 'mobile','wifi' if proxy_wifi and clash_ok else 'mobile')
+                selection=('wifi' if use_wifi else 'mobile','wifi' if total_blocked or proxy_wifi and clash_ok else 'mobile')
                 if selection!=last_selection:
                     command(['logger','-t','wifi-data-switch','direct='+selection[0]+' proxy='+selection[1]],check=False)
                     write(RUN/'last-switch.json',{'time':int(time.time()),'direct':selection[0],'proxy':selection[1]})
@@ -267,7 +269,7 @@ def daemon():
                             if service.exists() and command([str(service),'enabled'],check=False).returncode==0:
                                 subprocess.Popen([str(service),'restart'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
                     last_selection=selection
-                write(RUN/'status.json',{'ready':True,'time':int(time.time()),'wifi_direct':use_wifi,'direct':selection[0],'proxy':selection[1],'health':scores,'clash_bound':clash_ok,'mode':cfg['mode']})
+                write(RUN/'status.json',{'ready':True,'time':int(time.time()),'wifi_direct':use_wifi,'direct':selection[0],'proxy':selection[1],'health':scores,'clash_bound':clash_ok,'mode':cfg['mode'],'mobile_blocked':total_blocked,'quota_wifi_only':total_blocked})
                 (RUN/'error.json').unlink(missing_ok=True)
             except Exception as error:
                 rule(31020,[],False)
@@ -278,10 +280,13 @@ def daemon():
                 time.sleep(1)
     finally:
         meter.flush()
-        rule(31020,[],False)
+        blocked=read(RUN/'usage-status.json',{}).get('mobile_total_exceeded',False)
+        if not blocked:
+            quota.mobile_guard(sys.modules[__name__],hardware()['mobile_device'],False)
+            rule(31020,[],False)
         command(['nft','delete','table','inet','wifi_data_switch'],check=False)
         # Keep explicit bound-uplink routes for already established sockets.
-        write(RUN/'status.json',{'ready':False,'direct':'mobile','proxy':'mobile','wifi_direct':False})
+        write(RUN/'status.json',{'ready':False,'direct':'wifi' if blocked else 'mobile','proxy':'wifi' if blocked else 'mobile','wifi_direct':bool(blocked),'mobile_blocked':bool(blocked)})
 METHODS={'status':{},'configure':{'mode':'String','ssid':'String','encryption':'String','wifi_key':'String','failover':'String','band':'String','boost_enabled':'String','boost_strategy':'String','boost_devices':'String','boost_domains':'String','daily_mib':'String','monthly_mib':'String','billing_day':'String','mobile_daily_mib':'String','mobile_monthly_mib':'String'},'scan':{},'apply':{}}
 def main():
     ensure_dirs()

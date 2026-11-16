@@ -55,6 +55,7 @@ def main():
             controller.command(['ip', '-4', 'route', 'flush', 'table', table], check=False)
         controller.command(['nft', 'delete', 'table', 'inet', 'wifi_data_switch'], check=False)
         controller.command(['nft','delete','table','inet','wds_meter'],check=False)
+        controller.command(['nft','delete','table','inet','wds_mobile_limit'],check=False)
         print('Routing and hook removed. Refresh your original OpenClash subscription/configuration before restarting OpenClash; see README rollback instructions.')
     else:
         raise SystemExit('Usage: maintenance.py setup|cleanup')
