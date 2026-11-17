@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Install/remove only this plugin's OpenClash hook and routing rules."""
 import pathlib
+import json
 import re
 import subprocess
 import sys
@@ -10,6 +11,21 @@ import controller
 BEGIN = '# BEGIN wifi-data-switch'
 END = '# END wifi-data-switch'
 HOOK = pathlib.Path('/etc/openclash/custom/openclash_custom_overwrite.sh')
+UI_ROOT = pathlib.Path('/www/luci-static/resources/view/wifi-data-switch')
+MENU_FILE = pathlib.Path('/usr/share/luci/menu.d/luci-app-wifi-data-switch.json')
+
+
+def publish_ui():
+    """Give each UI release its own LuCI module URL, independent of LuCI's cache tag."""
+    menu = json.loads(MENU_FILE.read_text())
+    name = menu['admin/network/wifi-data-switch']['action']['path'].split('/')[-1]
+    if not re.fullmatch(r'settings_v[0-9]+', name):
+        raise ValueError('Invalid versioned view entry')
+    target = UI_ROOT / (name + '.js')
+    stage = target.with_suffix('.new')
+    stage.write_bytes((UI_ROOT / 'settings.js').read_bytes())
+    stage.chmod(0o644)
+    stage.replace(target)
 
 
 def edit_hook(remove=False):
@@ -30,6 +46,7 @@ def edit_hook(remove=False):
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else ''
     if action == 'setup':
+        publish_ui()
         controller.ensure_dirs()
         settings = controller.ROOT / 'settings.json'
         if not settings.exists():

@@ -44,6 +44,8 @@ async function test() {
   assert.match(text(dom), /加速移动流量/);
   assert.match(text(dom), /Wi-Fi 总用量/);
   assert.match(text(dom), /实际加速流量/);
+  assert.match(text(dom), /v0\.8\.1/);
+  assert.match(text(dom), /QUIC \/ HTTP\/3 分担/);
   assert.match(text(dom), /30\.00/);
   assert.match(text(dom), /75% \/ 25%/);
   assert.match(text(dom), /移动总用量/);
@@ -94,6 +96,12 @@ async function test() {
   await polls[0]();
   assert.match(text(dom), /代理 → 已停用/);
   assert.match(text(dom), /正在使用备用网络/);
+  global.window={location:{hash:'#boost'}};
+  const linkedDom=page.render(state);
+  const linkedContent=walk(linkedDom).find(v=>v.attrs.class==='wds-content');
+  assert.deepEqual(linkedContent.children.map(v=>v.hidden),[true,true,false,true]);
+  assert.ok(walk(linkedContent.children[2]).some(v=>v.attrs.class==='wds-protocols'));
+  delete global.window;
   console.log('UI rendering, settings submission and live failover status passed.');
 }
 test().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-wifi-data-switch
-PKG_VERSION:=0.8.0
+PKG_VERSION:=0.8.1
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKGARCH:=all
@@ -21,6 +21,7 @@ endef
 
 define Package/luci-app-wifi-data-switch/install
 	$(CP) ./files/* $(1)/
+	$(CP) ./files/www/luci-static/resources/view/wifi-data-switch/settings.js $(1)/www/luci-static/resources/view/wifi-data-switch/settings_v081.js
 endef
 
 define Package/luci-app-wifi-data-switch/conffiles

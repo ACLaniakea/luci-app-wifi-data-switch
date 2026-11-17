@@ -74,6 +74,18 @@ class BackendTest(unittest.TestCase):
 
 
 class HookTest(unittest.TestCase):
+    def test_menu_points_to_a_fresh_readable_ui_module(self):
+        menu_file=BASE.parents[1]/'share/luci/menu.d/luci-app-wifi-data-switch.json'
+        entry=json.loads(menu_file.read_text())['admin/network/wifi-data-switch']['action']['path'].split('/')[-1]
+        with tempfile.TemporaryDirectory() as directory:
+            root=pathlib.Path(directory)
+            (root/'settings.js').write_text('new release module')
+            with mock.patch.object(maintenance,'UI_ROOT',root),mock.patch.object(maintenance,'MENU_FILE',menu_file):
+                maintenance.publish_ui()
+            self.assertEqual((root/(entry+'.js')).read_text(),'new release module')
+            self.assertTrue((root/(entry+'.js')).stat().st_mode & 0o444)
+        makefile=(BASE.parents[3]/'Makefile').read_text()
+        self.assertIn(entry+'.js',makefile)
     def test_missing_openclash_does_not_prevent_setup(self):
         with tempfile.TemporaryDirectory() as directory:
             hook = pathlib.Path(directory) / 'missing-hook.sh'
