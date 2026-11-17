@@ -65,7 +65,7 @@ def main():
         subprocess.run(['/etc/init.d/wifi-data-switch', 'disable'], check=False)
         controller.native.Manager(controller).cleanup_bypass()
         edit_hook(remove=True)
-        for priority in (10510, 10511, 10512, 10513, 10514, 10520, 10521, 31020):
+        for priority in (10510, 10511, 10512, 10513, 10514, 10515, 10520, 10521, 31020):
             controller.rule(priority, [], False)
         for table in ('201', '202'):
             controller.command(['ip', '-4', 'route', 'flush', 'table', table], check=False)
@@ -73,6 +73,10 @@ def main():
         controller.command(['nft','delete','table','inet','wds_meter'],check=False)
         controller.command(['nft','delete','table','inet','wds_mobile_limit'],check=False)
         controller.command(['nft','delete','table','inet','wds_performance'],check=False)
+        controller.command(['nft','delete','set','inet','fw4','wds_wifi_direct'],check=False)
+        for directory in pathlib.Path('/tmp').glob('dnsmasq.*.d'):
+            file=directory/'wifi-data-switch-prefer.conf'
+            if file.is_file():file.unlink();controller.command(['/etc/init.d/dnsmasq','restart'],check=False)
         print('Routing and hook removed. Refresh your original OpenClash subscription/configuration before restarting OpenClash; see README rollback instructions.')
     else:
         raise SystemExit('Usage: maintenance.py setup|cleanup')

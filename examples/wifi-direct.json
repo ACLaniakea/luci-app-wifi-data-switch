@@ -1,0 +1,9 @@
+{
+  "domains": ["bilivideo.com", "bilivideo.cn", "acgvideo.com"],
+  "seed_hosts": [
+    "upos-sz-mirrorcos.bilivideo.com",
+    "upos-sz-mirrorcoso1.bilivideo.com",
+    "upos-sz-mirrorhw.bilivideo.com",
+    "upos-sz-mirrorali.bilivideo.com"
+  ]
+}

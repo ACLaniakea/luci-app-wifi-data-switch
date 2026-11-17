@@ -25,6 +25,7 @@ module WifiDataBoost
     udp_gate=quic ? 'AND,((NETWORK,UDP),(NOT,((DST-PORT,443)))),DIRECT' : 'NETWORK,UDP,DIRECT'
     scope=[udp_gate,'DST-PORT,22,DIRECT','DST-PORT,3389,DIRECT','DST-PORT,47984-48010,DIRECT','DST-PORT,21115-21119,DIRECT']
     ['0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.168.0.0/16','224.0.0.0/4'].each { |net| scope << "IP-CIDR,#{net},DIRECT,no-resolve" }
+    runtime.fetch('wifi_domains',[]).each { |domain| scope << "DOMAIN-SUFFIX,#{domain},DIRECT" }
     domain_rules=wide ? ["MATCH,#{PREFIX}POOL"] : domains.map { |domain| "DOMAIN-SUFFIX,#{domain},#{PREFIX}POOL" } + ['MATCH,DIRECT']
     if mode=='whitelist'
       raise 'Whitelist cannot be empty' if devices.empty?

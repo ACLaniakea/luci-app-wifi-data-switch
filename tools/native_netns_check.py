@@ -22,7 +22,7 @@ try:
  run('sysctl','-qw','net.ipv4.ip_forward=1',ns='r')
  for key in ['all','default','lan','wifi','cell']:run('sysctl','-qw','net.ipv4.conf.'+key+'.rp_filter=0',ns='r')
  run('ip','route','add','default','via','192.0.2.2','dev','wifi',ns='r')
- for mark,table,gw,dev in [('0x5752','202','192.0.2.2','wifi'),('0x5753','201','198.51.100.2','cell'),('0x5754','202','192.0.2.2','wifi')]:
+ for mark,table,gw,dev in [('0x5752','202','192.0.2.2','wifi'),('0x5753','201','198.51.100.2','cell'),('0x5754','202','192.0.2.2','wifi'),('0x5755','202','192.0.2.2','wifi')]:
   run('ip','rule','add','fwmark',mark,'lookup',table,ns='r');run('ip','route','replace','table',table,'default','via',gw,'dev',dev,ns='r')
  for key in 'wm':
   code="import socket,threading\ndef handle(c):\n try:\n  while c.recv(4096):c.sendall(b'HTTP/1.1 200 OK\\r\\nContent-Length: 1\\r\\n\\r\\n'+"+repr(key.encode())+")\n finally:c.close()\ns=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',18080));s.listen()\nwhile True:\n c,a=s.accept();threading.Thread(target=handle,args=(c,),daemon=True).start()"
@@ -59,6 +59,15 @@ try:
   rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(12)]
   assert rows.count('m')==12*share//100,rows
   print('Weighted native share',share,rows,flush=True)
+ run('nft','-f','-',ns='r',input='add set inet wds_native wds_wifi_direct { type ipv4_addr; flags timeout; timeout 2h; }\nadd element inet wds_native wds_wifi_direct {203.0.113.1}\n')
+ run('nft','-f','-',ns='r',input=native.rules({'_wifi_direct_domains':['video.test']},'lan',True))
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(8)]
+ assert rows==['w']*8,rows
+ print('Preferred video address stays on Wi-Fi:',rows,flush=True)
+ run('nft','flush','set','inet','wds_native','wds_wifi_direct',ns='r')
+ rows=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(8)]
+ assert set(rows)=={'w','m'},rows
+ print('Unmatched addresses still use both uplinks:',rows,flush=True)
  run('nft','-f','-',ns='r',input=native.rules({'_mobile_share':0},'lan',True))
  client="import socket,time\ns=socket.create_connection(('203.0.113.1',18080),timeout=3)\nfor i in range(2):\n s.sendall(b'GET / HTTP/1.1\\r\\nHost: test\\r\\n\\r\\n');print(s.recv(4096)[-1:].decode(),flush=True);time.sleep(1)\ns.close()"
  held=subprocess.Popen(['ip','netns','exec',names['c'],'python3','-u','-c',client],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);procs.append(held)

@@ -10,6 +10,7 @@ import hashlib
 import native
 import quota
 import performance
+import streaming
 import fcntl
 import ipaddress
 import json
@@ -99,6 +100,7 @@ def setup_routes(wifi,cell,active):
     # Keep OpenClash TPROXY packets on their own routing table.
     rule(10513,['fwmark','0x5753','lookup','201'])
     rule(10514,['fwmark','0x5754','lookup','202'])
+    rule(10515,['fwmark','0x5755','lookup','202'])
     rule(31020,['not','fwmark',hardware()['clash_mark'],'lookup','202'],active)
     has_table=command(['nft','list','table','inet','wifi_data_switch'],check=False).returncode==0
     if active and not has_table:
@@ -142,7 +144,7 @@ def acceleration(args):
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
     return {'enabled':enabled,'active':bool(enabled and cfg['mode'] in ('split','direct') and wifi and mobile),
-            'strategy':'round-robin','quic':cfg.get('boost_quic',False),'scope':cfg.get('boost_scope','all_tcp'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
+            'strategy':'round-robin','quic':cfg.get('boost_quic',False),'wifi_domains':cfg.get('_wifi_direct_domains',[]),'scope':cfg.get('boost_scope','all_tcp'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
     if path is None:return False
@@ -240,6 +242,7 @@ def daemon():
     if previous.get('ready') and 0<=time.time()-previous.get('time',0)<30:
         scores=previous.get('health',scores)
     native_manager=native.Manager(sys.modules[__name__])
+    streams=streaming.Manager(sys.modules[__name__])
     perf=performance.Manager(sys.modules[__name__])
     sampler=performance.Sampler(sys.modules[__name__],perf)
     probes=performance.Probes(sys.modules[__name__])
@@ -268,6 +271,7 @@ def daemon():
                 total_blocked=bool(usage.get('mobile_total_exceeded'))
                 direct_wifi,proxy_wifi=quota.select_policy(cfg,w,c,usage,choose_uplinks)
                 device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
+                cfg['_wifi_direct_domains']=streams.sync(cfg,w)
                 boost=boost_runtime(cfg,w,c)
                 boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流或仅双网加速模式' if cfg['mode'] not in ('split','direct') else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到移动总流量额度' if usage.get('mobile_total_exceeded') else '已达到加速流量额度' if usage['exceeded'] else '双网加速已就绪'))))
                 boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
@@ -300,6 +304,7 @@ def daemon():
             time.sleep(1)
     finally:
         probes.close()
+        streams.close()
         sampler.close()
         native_manager.cleanup_bypass()
         if native_manager.state():native_manager.restore()

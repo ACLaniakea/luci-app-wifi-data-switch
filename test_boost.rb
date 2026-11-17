@@ -62,3 +62,10 @@ puts 'Legacy sticky setting normalized to round-robin'
   WifiDataBoost.restore(cfg);check(cfg['rules']==original['rules'])
 end
 puts 'All DIRECT TCP scope and device exclusions passed'
+
+cfg=Marshal.load(Marshal.dump(original))
+WifiDataBoost.apply(cfg,runtime.merge('scope'=>'all_tcp','wifi_domains'=>['bilivideo.com']),{})
+scope=cfg['sub-rules']['WDS-BOOST-SCOPE']
+check(cfg['rules'][0]==original['rules'][0])
+check(scope.index('DOMAIN-SUFFIX,bilivideo.com,DIRECT')<scope.index('MATCH,WDS-BOOST-POOL'))
+puts 'Preferred DIRECT video domains preserve unrelated proxy rules'
