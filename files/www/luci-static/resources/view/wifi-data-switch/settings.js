@@ -5,7 +5,7 @@
 'require ui';
 
 var api = {};
-[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains', 'daily_mib', 'monthly_mib', 'billing_day', 'mobile_daily_mib', 'mobile_monthly_mib', 'boost_device_mode', 'boost_scope']],
+[['status', []], ['configure', ['mode', 'ssid', 'encryption', 'wifi_key', 'failover', 'band', 'boost_enabled', 'boost_strategy', 'boost_devices', 'boost_domains', 'daily_mib', 'monthly_mib', 'billing_day', 'mobile_daily_mib', 'mobile_monthly_mib', 'boost_device_mode', 'boost_scope', 'boost_adaptive', 'boost_quic']],
  ['scan', []], ['devices', []], ['apply', []]].forEach(function(entry) {
     api[entry[0]] = rpc.declare({ object: 'wifi-data-switch', method: entry[0], params: entry[1], expect: {} });
 });
@@ -36,6 +36,14 @@ return view.extend({
         var summary = E('div', { 'class':'wds-summary' });
         var usagePanel = E('div', { 'class':'wds-usage' });
         var pending = E('span', { 'class':'wds-save-state' });
+        var performanceOverview = E('div', {}), performanceBoost = E('div', {});
+        function performanceView(s) {
+            var p = s.performance || {}, r = p.rates || {}, active = (s.boost || {}).active;
+            var fresh = p.ready && Math.abs(Date.now() / 1000 - Number(p.sampled_at)) < 15;
+            function metric(label, key) { return E('div', {'class':'wds-metric'}, [E('span', {'class':'wds-muted'}, [label]), E('div', {}, [E('strong', {}, [fresh ? Number(r[key + '_down'] || 0).toFixed(2) : '—']), ' Mbps']), E('span', {'class':'wds-muted'}, ['上传 ' + (fresh ? Number(r[key + '_up'] || 0).toFixed(2) : '—') + ' Mbps'])]); }
+            var message = !active ? (s.boost || {}).reason || '加速已关闭' : !fresh ? '正在读取速率' : Number(r.wifi_down || 0) + Number(r.mobile_down || 0) < 0.01 ? '等待加速流量' : '正在分担流量';
+            return E('div', {'class':'wds-performance'}, [E('div', {'class':'wds-summary-head'}, [E('strong', {}, ['实际加速流量']), E('span', {'class':'wds-muted'}, [message])]), E('div', {'class':'wds-metrics'}, [metric('Wi-Fi', 'wifi'), metric('移动数据', 'mobile')]), E('p', {'class':'wds-help'}, [!active ? '这里只统计参与加速的流量。' : p.core_ready === false ? '调度暂未同步，等待恢复。' : (p.reason || '观察链路状态') + ' · 新连接目标 ' + (100 - Number(p.mobile_share == null ? 50 : p.mobile_share)) + '% / ' + Number(p.mobile_share == null ? 50 : p.mobile_share) + '%（Wi-Fi / 移动）。'])]);
+        }
         var lastCounters = {};
         function card(title, info, health, detail) {
             var now = Date.now(), prev = lastCounters[title], c = info.counters || {};
@@ -47,6 +55,7 @@ return view.extend({
                 E('div', { 'class':'wds-link-detail' }, [(info.addresses || []).join(', ') || '—'])]);
         }
         function update(s) {
+            performanceOverview.replaceChildren(performanceView(s)); performanceBoost.replaceChildren(performanceView(s));
             var w = s.wifi || {}, m = s.mobile || {}, h = s.health || {};
             cards.replaceChildren(card('Wi-Fi', w, h.wifi || {}, (w.ssid || (s.settings || {}).ssid || '') + (w.signal ? ' · ' + w.signal + ' dBm' : '')), card('移动数据', m, h.mobile || {}, m.up ? '蜂窝已连接' : '等待蜂窝连接'));
             var usage = s.usage || {}, networks = usage.networks || {}, daily = usage.daily || {}, monthly = usage.monthly || {};
@@ -58,7 +67,7 @@ return view.extend({
             var normalProxy = savedMode === 'direct' ? 'none' : savedMode === 'wifi' ? 'wifi' : 'mobile';
             var fallback = s.ready && (s.direct !== (savedMode === 'mobile' ? 'mobile' : 'wifi') || s.proxy !== normalProxy);
             var message = !s.ready ? '服务未运行' : (s.last_error || {}).error_type ? '网络检测异常' : s.quota_wifi_only ? '移动流量已到额，当前仅使用 Wi-Fi' : fallback ? '正在使用备用网络' : '网络正常';
-            var boostText = boost.active && s.clash_bound ? '运行中 · ' + (boost.scope === 'domains' ? '指定域名' : '全部直连 TCP') : boost.reason || '已关闭';
+            var boostText = boost.active && s.clash_bound ? '运行中 · ' + (boost.scope === 'domains' ? '指定域名' : (boost.quic ? 'TCP + QUIC' : '直连 TCP')) : boost.reason || '已关闭';
             var alert = E('div', {'class':'wds-alert'}, [!usage.ready ? '流量统计未就绪，加速暂停' : usage.mobile_total_exceeded ? '移动总量已到额' : '加速流量已到额']); alert.hidden = !usage.exceeded && usage.ready !== false;
             summary.replaceChildren(E('div', {'class':'wds-summary-head'}, [E('strong', {}, [modes[savedMode] || '读取中']), E('span', {'class':'wds-muted'}, [message])]),
                 E('div', {'class':'wds-routes'}, [E('span', {}, ['直连 → ' + routeLabel(s.direct)]), E('span', {}, ['代理 → ' + routeLabel(s.proxy)])]),
@@ -89,7 +98,9 @@ return view.extend({
             }, false); }) : [E('p', {}, ['未发现网络'])]);
         }); }, false);
         var boostEnabled = E('input', {type:'checkbox'}); boostEnabled.checked = !!cfg.boost_enabled;
-        var boostScope = E('select', {'class':'cbi-input-select'}, [E('option', {value:'all_tcp'}, ['全部直连 TCP']), E('option', {value:'domains'}, ['仅指定域名'])]); boostScope.value = cfg.boost_scope || 'all_tcp';
+        var boostAdaptive = E('input', {type:'checkbox'}); boostAdaptive.checked = cfg.boost_adaptive !== false;
+        var boostQuic = E('input', {type:'checkbox'}); boostQuic.checked = !!cfg.boost_quic;
+        var boostScope = E('select', {'class':'cbi-input-select'}, [E('option', {value:'all_tcp'}, ['全部直连连接']), E('option', {value:'domains'}, ['仅指定域名'])]); boostScope.value = cfg.boost_scope || 'all_tcp';
         var boostDevices = E('textarea', {'class':'cbi-input-textarea', rows:'3', placeholder:'每行一个 IP 或网段'}, [cfg.boost_devices || '']); boostDevices.value = cfg.boost_devices || '';
         var recommendedDomains = (initial.recommended_domains || ['download.windowsupdate.com', 'dl.delivery.mp.microsoft.com', 'mirrors.tuna.tsinghua.edu.cn', 'mirrors.ustc.edu.cn']).join('\n');
         var boostDomains = E('textarea', {'class':'cbi-input-textarea', rows:'7', placeholder:'每行一个域名，包含子域名'}, [cfg.boost_domains || recommendedDomains]); boostDomains.value = cfg.boost_domains || recommendedDomains;
@@ -124,14 +135,14 @@ return view.extend({
         }
         var dailyLimit = quotaInput(cfg.daily_mib), monthlyLimit = quotaInput(cfg.monthly_mib), mobileDaily = quotaInput(cfg.mobile_daily_mib), mobileMonthly = quotaInput(cfg.mobile_monthly_mib);
         var billingDay = E('input', {'class':'cbi-input-text', type:'number', min:'1', max:'28', value:cfg.billing_day || 1});
-        var accelerationPanel = panel('双网加速', [row('加速开关', toggle(boostEnabled, '开启双网加速'), '两条网络均可用时生效。'), row('流量范围', boostScope, '全部直连无需填写域名；指定域名只加速清单内的流量。'), row('设备范围', devicePicker, '白名单只加速所选设备；黑名单排除所选设备。'), domainPicker,
-            E('details', {'class':'wds-details'}, [E('summary', {}, ['哪些流量会加速？']), E('p', {}, ['全部直连 TCP 包括普通下载和网页连接，不必逐个填写域名。多连接任务更容易提速。']), E('p', {}, ['UDP、内网和常用远程端口保持原出口。单个连接仍只走一条网络；部分网站可能在意出口 IP 变化，可用设备黑名单排除。'])])]);
+        var accelerationPanel = panel('双网加速', [performanceBoost, row('加速开关', toggle(boostEnabled, '开启双网加速'), '两条网络均可用时生效。'), row('自动分配', toggle(boostAdaptive, '根据出口拥塞调整'), '持续拥塞时减少该出口的新连接，恢复后逐步回调；已有连接保持原出口。'), row('HTTP/3', toggle(boostQuic, '同时分担 QUIC 连接'), '允许直连 UDP 443 参与加速，每个会话保持固定出口。'), row('流量范围', boostScope, '全部直连无需填写域名；指定域名只加速清单内的流量。'), row('设备范围', devicePicker, '白名单只加速所选设备；黑名单排除所选设备。'), domainPicker,
+            E('details', {'class':'wds-details'}, [E('summary', {}, ['哪些流量会加速？']), E('p', {}, ['直连 TCP 包括普通下载和网页连接；开启 HTTP/3 后也包含直连 UDP 443。多连接任务更容易提速。']), E('p', {}, ['其他 UDP、内网和常用远程端口保持原出口。单个连接仍只走一条网络；部分网站可能在意出口 IP 变化，可用设备黑名单排除。'])])]);
         var quotaPanel = panel('流量限额', [E('p', {'class':'wds-muted'}, ['移动总量包含所有移动数据；加速用量只计算双网加速使用的部分。0 表示不限额。']), E('div', {'class':'wds-form-grid'}, [row('每日移动总量', mobileDaily.widget), row('每月移动总量', mobileMonthly.widget), row('每日加速用量', dailyLimit.widget), row('每月加速用量', monthlyLimit.widget), row('每月结算日', billingDay, '1–28 日，月额度按此日期结算。')]),
             E('div', {'class':'wds-quota-notes'}, [E('p', {}, [E('strong', {}, ['加速用量到额']), '　停止加速，其他流量按原模式运行']), E('p', {}, [E('strong', {}, ['移动总量到额']), '　停用移动数据；Wi-Fi 断网时不再回退'])])]);
         var settings = panel('网络设置', [row('上网模式', modeOptions, '前三种模式保留代理规则；无代理模式会停止 OpenClash。'), row('自动切换', toggle(failover, '网络断开时使用另一条'), '恢复后自动切回，已有连接可能需要重连。'), E('h4', {}, ['连接 Wi-Fi']), E('p', {'class':'wds-section-intro'}, ['设置用于上网的 Wi-Fi，修改后可能短暂断网。']), E('div', {'class':'wds-form-grid'}, [row('Wi-Fi 名称', ssid), row('频段', band), row('加密方式', encryption), row('密码', key)]), scanButton, scanResult]);
-        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), 'round-robin', boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value), mobileDaily.mib(), mobileMonthly.mib(), deviceMode.value, boostScope.value).then(function(r) { if (r.ok) { key.value = ''; pending.replaceChildren('已保存，待应用'); } notify(r); }); };
+        var saveSettings = function() { return api.configure(mode.value, ssid.value, encryption.value, key.value, String(failover.checked), band.value, String(boostEnabled.checked), 'round-robin', boostDevices.value, boostDomains.value, dailyLimit.mib(), monthlyLimit.mib(), String(billingDay.value), mobileDaily.mib(), mobileMonthly.mib(), deviceMode.value, boostScope.value, String(boostAdaptive.checked), String(boostQuic.checked)).then(function(r) { if (r.ok) { key.value = ''; pending.replaceChildren('已保存，待应用'); } notify(r); }); };
         var actions = E('div', {'class':'wds-actions'}, [pending, E('div', {}, [button('保存设置', saveSettings, false), button('应用已保存设置', function() { return api.apply().then(function(r) { notify(r); if (r.ok) pending.replaceChildren('正在应用…'); }); }, true)])]);
-        var overview = E('div', {}, [cards, panel('当前网络', [summary]), panel('流量用量', [E('p', {'class':'wds-section-intro'}, ['加速用量已包含在移动总量中。']), usagePanel, E('details', {'class':'wds-details'}, [E('summary', {}, ['统计说明']), E('p', {}, ['用量由路由器统计，可能与运营商账单有差异。']), E('p', {}, ['从启用统计后开始累计，之前的用量不计入。约每分钟保存一次，断电可能丢失最后一分钟的记录。'])])])]);
+        var overview = E('div', {}, [cards, panel('当前网络', [summary, performanceOverview]), panel('流量用量', [E('p', {'class':'wds-section-intro'}, ['加速用量已包含在移动总量中。']), usagePanel, E('details', {'class':'wds-details'}, [E('summary', {}, ['统计说明']), E('p', {}, ['用量由路由器统计，可能与运营商账单有差异。']), E('p', {}, ['从启用统计后开始累计，之前的用量不计入。约每分钟保存一次，断电可能丢失最后一分钟的记录。'])])])]);
         var tabs = [], sections = [overview, settings, accelerationPanel, quotaPanel];
         var navigation = E('nav', {'class':'wds-tabs', 'aria-label':'页面分区'}, ['概览', '网络设置', '双网加速', '流量限额'].map(function(label, index) {
             var tab = button(label, function() { sections.forEach(function(s, i) { s.hidden = i !== index; }); tabs.forEach(function(t, i) { t.className = 'wds-tab' + (i === index ? ' wds-tab-active' : ''); }); }, false); tab.className = 'wds-tab' + (index === 0 ? ' wds-tab-active' : ''); tabs.push(tab); return tab;
@@ -140,7 +151,7 @@ return view.extend({
         var noticeKey = 'wifi-data-switch-f50-notice-v1', acknowledged = false;
         try { acknowledged = localStorage.getItem(noticeKey) === 'yes'; } catch (_) {}
         if (!acknowledged && ui.showModal) ui.showModal('使用前确认', [E('p', {}, ['目前仅在 F50 上测试。']), E('p', {}, [noticeText]), button('知道了', function() { try { localStorage.setItem(noticeKey, 'yes'); } catch (_) {} ui.hideModal(); }, true)]);
-        return E('div', {'class':'wds-app'}, [E('link', {rel:'stylesheet', href:L.resource('view/wifi-data-switch/settings.css') + '?v=072-help'}), E('div', {'class':'wds-header'}, [E('h2', {}, ['Wi-Fi / 数据切换']), E('span', {'class':'wds-muted'}, ['F50'])]), navigation,
+        return E('div', {'class':'wds-app'}, [E('link', {rel:'stylesheet', href:L.resource('view/wifi-data-switch/settings.css') + '?v=080-performance'}), E('div', {'class':'wds-header'}, [E('h2', {}, ['双网管理']), E('span', {'class':'wds-muted'}, ['F50'])]), navigation,
             E('div', {'class':'wds-content'}, [overview, settings, accelerationPanel, quotaPanel]), E('details', {'class':'wds-details wds-notice'}, [E('summary', {}, ['使用须知']), E('p', {}, [noticeText])]), actions]);
     }
 });

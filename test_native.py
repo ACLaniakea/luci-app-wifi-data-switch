@@ -14,7 +14,7 @@ class NativeTest(unittest.TestCase):
   self.assertIn('iifname != "test-lan" return',text)
   self.assertIn('ip saddr != @selected return',text)
   self.assertIn('ct state established,related return',text)
-  self.assertIn('numgen inc mod 2',text)
+  self.assertIn('numgen inc mod 4',text)
   self.assertNotIn('numgen',native.rules(cfg,'test-lan',False))
   self.assertIn('0x5753',text)
   self.assertEqual(native.dns_text(['example.com']),'nftset=/example.com/4#inet#wds_native#targets\n')

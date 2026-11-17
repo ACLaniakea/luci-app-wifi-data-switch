@@ -15,13 +15,20 @@ def rules(cfg,lan,enabled,table=TABLE,chain='balance',guard='quota_guard',select
               base+'ct mark & 0xffff { 0x5752, 0x5753 } meta mark set ct mark & 0xffff return',
               base+'ct state established,related return']
     if enabled:
-        lines += [base+'meta l4proto != tcp return',base+'tcp dport { 22,3389,47984-48010,21115-21119 } return']
+        if cfg.get('boost_quic',False):
+            lines += [base+'meta l4proto != { tcp, udp } return',base+'meta l4proto udp udp dport != 443 return']
+        else:lines += [base+'meta l4proto != tcp return']
+        lines += [base+'tcp dport { 22,3389,47984-48010,21115-21119 } return']
         mode=cfg.get('boost_device_mode','whitelist' if devices else 'all')
         if mode=='whitelist':lines.append(base+'ip saddr != @'+selected+' return')
         if mode=='blacklist':lines.append(base+'ip saddr @'+selected+' return')
         lines.extend(base+q+' return' for q in qualifiers)
         match='ip daddr @targets ' if cfg.get('boost_scope','all_tcp')=='domains' else 'meta nfproto ipv4 '
-        lines += [base+match+'meta mark set numgen inc mod 2 map { 0 : 0x5752, 1 : 0x5753 } ct mark set (ct mark & 0xffff0000) | meta mark']
+        share=cfg.get('_mobile_share',50)
+        if share not in (0,25,50,75,100):raise ValueError('Invalid mobile connection share')
+        marks=['0x5753' if i < share//25 else '0x5752' for i in range(4)]
+        mapping=', '.join(str(i)+' : '+mark for i,mark in enumerate(marks))
+        lines += [base+match+'meta mark set numgen inc mod 4 map { '+mapping+' } ct mark set (ct mark & 0xffff0000) | meta mark']
     return '\n'.join(lines)+'\n'
 
 def dns_text(domains):
@@ -129,7 +136,7 @@ class Manager:
         if enabled:
             import quota
             quota.enable_forward_meter(c)
-        signature=json.dumps([cfg.get('boost_devices',''),cfg.get('boost_device_mode','all'),enabled])
+        signature=json.dumps([cfg.get('boost_devices',''),cfg.get('boost_device_mode','all'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),enabled])
         if self.bypass_signature!=signature:
             c.command(['nft','-f','-'],input=rules({**cfg,'boost_scope':'all_tcp'},hw['lan_device'],enabled,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass')))
             self.bypass_signature=signature
@@ -143,7 +150,7 @@ class Manager:
             quota.enable_forward_meter(c)
         enabled=bool(cfg.get('boost_enabled') and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
         hw=c.hardware() if hasattr(c,'hardware') else {'lan_device':'br-lan'}
-        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),cfg.get('boost_scope','all_tcp'),enabled])
+        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),cfg.get('boost_scope','all_tcp'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),enabled])
         if signature!=self.signature:
             c.command(['nft','-f','-'],input=rules(cfg,hw['lan_device'],enabled))
             domains=cfg.get('boost_domains','').split()

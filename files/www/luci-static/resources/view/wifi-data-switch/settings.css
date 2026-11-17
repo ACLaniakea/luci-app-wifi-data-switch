@@ -96,3 +96,10 @@
 .wds-panel>.wds-muted{margin-bottom:20px;line-height:1.7}
 
 .wds-app .wds-quota-input select{min-width:84px!important;max-width:94px!important;width:94px!important;flex:0 0 94px}
+.wds-performance{margin:8px 0 26px;padding-top:8px}
+.wds-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:18px 0 12px}
+.wds-metric{min-width:0;padding:16px;border:1px solid var(--wds-border);border-radius:10px}
+.wds-metric>div{margin:10px 0;font-size:13px;white-space:nowrap}
+.wds-metric strong{font-size:25px;font-weight:600;font-variant-numeric:tabular-nums}
+.wds-metric>.wds-muted{font-size:12px}
+@media(max-width:400px){.wds-metrics{gap:10px}.wds-metric{padding:12px}.wds-metric strong{font-size:22px}}

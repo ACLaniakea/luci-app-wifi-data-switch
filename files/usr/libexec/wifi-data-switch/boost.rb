@@ -8,17 +8,22 @@ module WifiDataBoost
     return if !wide && domains.empty?
     mode=runtime.fetch('device_mode', devices.empty? ? 'all' : 'whitelist')
     original=Marshal.load(Marshal.dump(data))
-    names=[PREFIX+'WIFI',PREFIX+'MOBILE',PREFIX+'POOL']
+    names=%w[WIFI MOBILE POOL BALANCED WIFI-BIAS MOBILE-BIAS].map { |v| PREFIX+v }
     raise 'Reserved boost name collision' if ((data['proxies'] || [])+(data['proxy-groups'] || [])).any? { |p| names.include?(p['name']) }
     key=PREFIX+'SCOPE'
     raise 'Reserved sub-rule name collision' if data.fetch('sub-rules',{}).key?(key)
     data['proxies'] ||= []
-    [['WIFI',hw.fetch('wifi_device','wlan-sta'),22354],['MOBILE',hw.fetch('mobile_device','sipa_eth0'),22355]].each do |label,iface,mark|
+    [['WIFI',hw.fetch('wifi_device','wlan-sta'),22356],['MOBILE',hw.fetch('mobile_device','sipa_eth0'),22355]].each do |label,iface,mark|
       data['proxies'] << {'name'=>PREFIX+label,'type'=>'direct','udp'=>true,'ip-version'=>'ipv4','interface-name'=>iface,'routing-mark'=>mark}
     end
     data['proxy-groups'] ||= []
-    data['proxy-groups'] << {'name'=>PREFIX+'POOL','type'=>'load-balance','proxies'=>[PREFIX+'WIFI',PREFIX+'MOBILE'],'strategy'=>'round-robin','url'=>'http://connectivitycheck.platform.hicloud.com/generate_204','interval'=>60}
-    scope=['NETWORK,UDP,DIRECT','DST-PORT,22,DIRECT','DST-PORT,3389,DIRECT','DST-PORT,47984-48010,DIRECT','DST-PORT,21115-21119,DIRECT']
+    [['BALANCED',['WIFI','MOBILE']],['WIFI-BIAS',['WIFI','BALANCED']],['MOBILE-BIAS',['MOBILE','BALANCED']]].each do |name,members|
+      data['proxy-groups'] << {'name'=>PREFIX+name,'type'=>'load-balance','proxies'=>members.map { |v| PREFIX+v },'strategy'=>'round-robin','url'=>'http://connectivitycheck.platform.hicloud.com/generate_204','interval'=>60}
+    end
+    data['proxy-groups'] << {'name'=>PREFIX+'POOL','type'=>'select','proxies'=>%w[BALANCED WIFI-BIAS MOBILE-BIAS WIFI MOBILE].map { |v| PREFIX+v },'interrupt-exist-connections'=>false,'hidden'=>true}
+    quic=runtime.fetch('quic',false)
+    udp_gate=quic ? 'AND,((NETWORK,UDP),(NOT,((DST-PORT,443)))),DIRECT' : 'NETWORK,UDP,DIRECT'
+    scope=[udp_gate,'DST-PORT,22,DIRECT','DST-PORT,3389,DIRECT','DST-PORT,47984-48010,DIRECT','DST-PORT,21115-21119,DIRECT']
     ['0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.168.0.0/16','224.0.0.0/4'].each { |net| scope << "IP-CIDR,#{net},DIRECT,no-resolve" }
     domain_rules=wide ? ["MATCH,#{PREFIX}POOL"] : domains.map { |domain| "DOMAIN-SUFFIX,#{domain},#{PREFIX}POOL" } + ['MATCH,DIRECT']
     if mode=='whitelist'
@@ -36,7 +41,7 @@ module WifiDataBoost
         parts=rule.split(','); target=parts[-1]=='no-resolve' ? -2 : -1
         next rule unless parts[target]=='DIRECT'
         if parts[0]=='MATCH'
-          "SUB-RULE,(NETWORK,TCP),#{key}"
+          quic ? "SUB-RULE,(OR,((NETWORK,TCP),(AND,((NETWORK,UDP),(DST-PORT,443))))),#{key}" : "SUB-RULE,(NETWORK,TCP),#{key}"
         elsif kinds.include?(parts[0]) && parts.length.between?(3,4)
           matcher=parts[0,2]; matcher << 'no-resolve' if parts[-1]=='no-resolve'
           "SUB-RULE,(#{matcher.join(',')}),#{key}"

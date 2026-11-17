@@ -11,6 +11,7 @@ function E(tag, attrs, children) { return new Element(tag, attrs, children); }
 function walk(node) { return node instanceof Element ? [node, ...node.children.flatMap(walk)] : []; }
 function text(node) { return node instanceof Element ? node.children.map(text).join(' ') : String(node); }
 const state = { ready: true, mode: 'split', direct: 'wifi', proxy: 'mobile', clash_bound: true,
+  boost: { active:true }, performance: {ready:true, sampled_at:Date.now()/1000, mobile_share:25, core_ready:true, rates:{wifi_down:30, mobile_down:10}},
   health: { wifi: { online: true }, mobile: { online: true } },
   settings: { mode: 'split', ssid: 'Example-WiFi', encryption: 'none', failover: true },
   wifi: { up: true, addresses: ['192.0.2.2'], signal: '-55', frequency: '5220', counters: {} },
@@ -42,10 +43,13 @@ async function test() {
   assert.equal(walk(dom).filter(v => v.tag === 'input' && v.attrs.type === 'radio' && v.attrs.value === 'direct').length, 1);
   assert.match(text(dom), /加速移动流量/);
   assert.match(text(dom), /Wi-Fi 总用量/);
+  assert.match(text(dom), /实际加速流量/);
+  assert.match(text(dom), /30\.00/);
+  assert.match(text(dom), /75% \/ 25%/);
   assert.match(text(dom), /移动总用量/);
   assert.match(text(dom), /日/);
   assert.equal(walk(dom).filter(v => v.tag === 'button' && text(v) === '保存设置').length, 1);
-  const scope = walk(dom).find(v => v.tag === 'select' && text(v).includes('全部直连 TCP'));
+  const scope = walk(dom).find(v => v.tag === 'select' && text(v).includes('全部直连连接'));
   assert.equal(scope.value, 'all_tcp');
   const domainField = walk(dom).find(v => v.attrs.class === 'wds-field' && text(v).startsWith('加速域名'));
   assert.equal(domainField.hidden, true);
@@ -72,6 +76,8 @@ async function test() {
   assert.equal(config[1][8], '192.0.2.2');
   assert.equal(config[1][15], 'whitelist');
   assert.equal(config[1][16], 'all_tcp');
+  assert.equal(config[1][17], 'true');
+  assert.equal(config[1][18], 'false');
   assert.match(config[1][9], /download.windowsupdate.com/);
   assert.equal(config[1][13], '1536');
   assert.equal(config[1][4], 'true');
@@ -79,7 +85,9 @@ async function test() {
   assert.equal(calls.some(v => /auth/.test(v[0])), false);
   assert.equal(save.disabled, false);
   state.direct = 'mobile'; state.health.wifi.online = false;
+  state.performance.sampled_at = Date.now()/1000 - 30;
   await polls[0]();
+  assert.doesNotMatch(text(dom), /30\.00/);
   assert.match(text(dom), /直连 → 移动数据/);
   assert.match(text(dom), /待认证 \/ 检测中/);
   state.mode = 'direct'; state.native_mode = true; state.proxy = 'none';

@@ -8,7 +8,9 @@ WifiDataBoost.apply(data,runtime,{})
 check(data['rules'][0]==original['rules'][0])
 check(data['rules'][1]=='SUB-RULE,(DOMAIN-SUFFIX,example.com),WDS-BOOST-SCOPE')
 check(data['sub-rules']['WDS-BOOST-SCOPE'].first=='NETWORK,UDP,DIRECT')
-check(data['proxy-groups'].last['strategy']=='round-robin')
+check(data['proxy-groups'].last['type']=='select')
+check(data['proxy-groups'].last['proxies'].first=='WDS-BOOST-BALANCED')
+check(data['proxy-groups'].last['interrupt-exist-connections']==false)
 File.write(ARGV[0],YAML.dump(data)) if ARGV[0]
 WifiDataBoost.restore(data)
 check(data['rules']==original['rules'])
@@ -40,7 +42,7 @@ puts 'All devices, whitelist and blacklist domain gates passed'
 
 legacy=Marshal.load(Marshal.dump(original))
 WifiDataBoost.apply(legacy,runtime.merge('strategy'=>'sticky-sessions'),{})
-check(legacy['proxy-groups'].find { |g| g['name']=='WDS-BOOST-POOL' }['strategy']=='round-robin')
+check(legacy['proxy-groups'].find { |g| g['name']=='WDS-BOOST-BALANCED' }['strategy']=='round-robin')
 puts 'Legacy sticky setting normalized to round-robin'
 
 %w[all whitelist blacklist].each do |mode|

@@ -1,6 +1,6 @@
 {
   "admin/network/wifi-data-switch": {
-    "title": "Wi-Fi / 数据切换",
+    "title": "双网管理",
     "order": 35,
     "action": {"type": "view", "path": "wifi-data-switch/settings"},
     "depends": {"acl": ["luci-app-wifi-data-switch"]}
