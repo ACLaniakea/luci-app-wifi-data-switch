@@ -44,7 +44,8 @@ async function test() {
   assert.match(text(dom), /加速移动流量/);
   assert.match(text(dom), /Wi-Fi 总用量/);
   assert.match(text(dom), /实际加速流量/);
-  assert.match(text(dom), /v0\.8\.2/);
+  assert.match(text(dom), /v0\.9\.0/);
+  assert.match(text(dom), /Wi-Fi 优先 · 并发分担/);
   assert.match(text(dom), /QUIC \/ HTTP\/3/);
   assert.match(text(dom), /30\.00/);
   assert.match(text(dom), /75% \/ 25%/);

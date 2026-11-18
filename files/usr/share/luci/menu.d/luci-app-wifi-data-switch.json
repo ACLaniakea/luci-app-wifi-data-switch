@@ -2,7 +2,7 @@
   "admin/network/wifi-data-switch": {
     "title": "双网管理",
     "order": 35,
-    "action": {"type": "view", "path": "wifi-data-switch/settings_v082"},
+    "action": {"type": "view", "path": "wifi-data-switch/settings_v090"},
     "depends": {"acl": ["luci-app-wifi-data-switch"]}
   }
 }

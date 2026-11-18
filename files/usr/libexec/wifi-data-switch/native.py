@@ -1,5 +1,6 @@
 """Native dnsmasq+nftables balancing; no OpenClash core needed in this mode."""
 import contextlib,fcntl,ipaddress,json,pathlib,re,subprocess,sys,time
+import admission
 TABLE='wds_native'
 DNS_KEYS=('server','noresolv')
 
@@ -30,7 +31,10 @@ def rules(cfg,lan,enabled,table=TABLE,chain='balance',guard='quota_guard',select
         if share not in (0,25,50,75,100):raise ValueError('Invalid mobile connection share')
         marks=['0x5753' if i < share//25 else '0x5752' for i in range(4)]
         mapping=', '.join(str(i)+' : '+mark for i,mark in enumerate(marks))
-        lines += [base+match+'meta mark set numgen inc mod 4 map { '+mapping+' } ct mark set (ct mark & 0xffff0000) | meta mark']
+        gate=admission.gate() if cfg.get('_smart_admission') else ''
+        lines += [base+match+gate+'meta mark set numgen inc mod 4 map { '+mapping+' } ct mark set (ct mark & 0xffff0000) | meta mark return']
+        if gate:
+            lines.append(base+match+'meta mark set 0x5752 ct mark set (ct mark & 0xffff0000) | meta mark')
     return '\n'.join(lines)+'\n'
 
 def dns_text(domains):
@@ -45,6 +49,10 @@ class Manager:
             fcntl.flock(lock,fcntl.LOCK_EX)
             yield
     def boot(self):return pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    def admission(self,cfg,table):
+        if not cfg.get('_smart_admission'):return
+        if self.c.command(['nft','list','set','inet',table,admission.SET],check=False).returncode:
+            self.c.command(['nft','-f','-'],input=admission.native_set(table))
     def service(self,action):
         if not pathlib.Path('/etc/init.d/openclash').exists():return False
         return self.c.command(['/etc/init.d/openclash',action],check=False,timeout=50).returncode==0
@@ -56,6 +64,8 @@ class Manager:
         if not re.search(r'(?<!\S)nftset(?!\S)',c.command(['dnsmasq','--version']).stdout):raise ValueError('仅双网加速需要支持 nftset 的 dnsmasq，请先安装对应的 dnsmasq-full。')
         if c.command(['uci','-q','get','firewall.@defaults[0].flow_offloading'],check=False).stdout.strip()=='1':
             raise ValueError('仅双网加速的流量计量需要关闭防火墙流量分载，请先关闭后再应用。')
+        if c.command(['nft','-c','-f','-'],check=False,input=admission.local_script().replace('wds_admission','wds_admission_probe')).returncode:
+            raise ValueError('当前内核不支持并发连接计数，无法启用仅双网加速。')
     def enter(self,cfg,state=None):
         c=self.c
         # Preflight before touching the running proxy or DNS service.
@@ -117,6 +127,7 @@ class Manager:
         if self.c.command(['nft','list','chain','inet','fw4','wds_balance'],check=False).returncode:
             self.bypass_signature=None;return
         self.c.command(['nft','-f','-'],input='delete chain inet fw4 wds_balance\ndelete chain inet fw4 wds_quota_guard\ndelete set inet fw4 wds_selected\n')
+        self.c.command(['nft','delete','set','inet','fw4',admission.SET],check=False)
         self.bypass_signature=None
     def bypass(self,cfg,wifi,mobile,usage):
         """Balance only IPv4 flows already exempted by OpenClash's China-IP bypass."""
@@ -133,12 +144,13 @@ class Manager:
             c.command(['nft','-f','-'],input='add set inet fw4 wds_selected { type ipv4_addr; flags interval; }\nadd chain inet fw4 wds_balance { type filter hook prerouting priority -140; policy accept; }\nadd chain inet fw4 wds_quota_guard { type filter hook forward priority -6; policy accept; }\n')
             self.bypass_signature=None
         offload=c.command(['uci','-q','get','firewall.@defaults[0].flow_offloading'],check=False).stdout.strip()=='1'
-        enabled=bool(not offload and cfg.get('boost_enabled') and cfg.get('boost_scope','all_tcp')=='all_tcp' and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
+        enabled=bool(not offload and not cfg.get('_admission_failed') and cfg.get('boost_enabled') and cfg.get('boost_scope','all_tcp')=='all_tcp' and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
         hw=c.hardware() if hasattr(c,'hardware') else {'lan_device':'br-lan'}
         if enabled:
             import quota
             quota.enable_forward_meter(c)
-        signature=json.dumps([cfg.get('boost_devices',''),cfg.get('boost_device_mode','all'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),cfg.get('_wifi_direct_domains',[]),enabled])
+        self.admission(cfg,'fw4')
+        signature=json.dumps([cfg.get('boost_devices',''),cfg.get('boost_device_mode','all'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),cfg.get('_wifi_direct_domains',[]),cfg.get('_smart_admission',False),enabled])
         if self.bypass_signature!=signature:
             c.command(['nft','-f','-'],input=rules({**cfg,'boost_scope':'all_tcp'},hw['lan_device'],enabled,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass')))
             self.bypass_signature=signature
@@ -152,7 +164,8 @@ class Manager:
             quota.enable_forward_meter(c)
         enabled=bool(cfg.get('boost_enabled') and wifi and mobile and usage.get('ready') and not usage.get('exceeded'))
         hw=c.hardware() if hasattr(c,'hardware') else {'lan_device':'br-lan'}
-        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),cfg.get('boost_scope','all_tcp'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),cfg.get('_wifi_direct_domains',[]),enabled])
+        self.admission(cfg,TABLE)
+        signature=json.dumps([cfg.get('boost_device_mode','all'),cfg.get('boost_devices',''),cfg.get('boost_domains',''),cfg.get('boost_scope','all_tcp'),cfg.get('_mobile_share',50),cfg.get('boost_quic',False),cfg.get('_wifi_direct_domains',[]),cfg.get('_smart_admission',False),enabled])
         if signature!=self.signature:
             c.command(['nft','-f','-'],input=rules(cfg,hw['lan_device'],enabled))
             domains=cfg.get('boost_domains','').split()

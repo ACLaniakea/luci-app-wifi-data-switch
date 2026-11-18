@@ -11,6 +11,7 @@ import native
 import quota
 import performance
 import streaming
+import admission
 import fcntl
 import ipaddress
 import json
@@ -144,7 +145,7 @@ def acceleration(args):
 def boost_runtime(cfg,wifi,mobile):
     enabled=cfg.get('boost_enabled',False)
     return {'enabled':enabled,'active':bool(enabled and cfg['mode'] in ('split','direct') and wifi and mobile),
-            'strategy':'round-robin','quic':cfg.get('boost_quic',False),'wifi_domains':cfg.get('_wifi_direct_domains',[]),'scope':cfg.get('boost_scope','all_tcp'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
+            'strategy':'round-robin','smart':cfg.get('_smart_admission',False),'quic':cfg.get('boost_quic',False),'wifi_domains':cfg.get('_wifi_direct_domains',[]),'scope':cfg.get('boost_scope','all_tcp'),'device_mode':cfg.get('boost_device_mode','whitelist' if cfg.get('boost_devices') else 'all'),'devices':cfg.get('boost_devices','').split(),'domains':cfg.get('boost_domains','').split()}
 def bind_clash(device):
     ensure_dirs();path=active_clash()
     if path is None:return False
@@ -243,6 +244,7 @@ def daemon():
         scores=previous.get('health',scores)
     native_manager=native.Manager(sys.modules[__name__])
     streams=streaming.Manager(sys.modules[__name__])
+    admissions=admission.Manager(sys.modules[__name__])
     perf=performance.Manager(sys.modules[__name__])
     sampler=performance.Sampler(sys.modules[__name__],perf)
     probes=performance.Probes(sys.modules[__name__])
@@ -272,9 +274,16 @@ def daemon():
                 direct_wifi,proxy_wifi=quota.select_policy(cfg,w,c,usage,choose_uplinks)
                 device=hw['wifi_device'] if proxy_wifi else hw['mobile_device']
                 cfg['_wifi_direct_domains']=streams.sync(cfg,w)
+                cfg['_smart_admission']=bool(cfg['mode']=='direct' or admissions.sync(cfg))
+                cfg['_admission_failed']=bool(cfg['mode']=='split' and cfg.get('boost_enabled') and not cfg['_smart_admission'])
                 boost=boost_runtime(cfg,w,c)
+                if cfg['mode']=='split' and cfg.get('boost_enabled') and not cfg['_smart_admission']:
+                    # Unsupported kernels fail safely to ordinary Wi-Fi DIRECT.
+                    boost['active']=False
                 boost['reason']='加速已关闭' if not boost['enabled'] else ('请切换至分流或仅双网加速模式' if cfg['mode'] not in ('split','direct') else ('等待两条出口联网' if not (w and c) else ('流量统计未就绪，暂停加速' if not usage['ready'] else ('已达到移动总流量额度' if usage.get('mobile_total_exceeded') else '已达到加速流量额度' if usage['exceeded'] else '双网加速已就绪'))))
                 boost['active']=bool(boost['active'] and usage['ready'] and not usage['exceeded'])
+                if cfg['mode']=='split' and boost['enabled'] and not cfg['_smart_admission']:
+                    boost['reason']='当前内核不支持并发分担，直连使用 Wi-Fi'
                 if read(RUN/'boost.json',{})!=boost:write(RUN/'boost.json',boost)
                 cfg['_mobile_share']=perf.recommend(cfg,probes.details)
                 clash_ok=native_manager.apply(cfg,w,c,usage) if cfg['mode']=='direct' else bind_clash(device)

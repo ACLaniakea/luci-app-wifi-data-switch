@@ -3,6 +3,7 @@ import subprocess,time,os,importlib.util,json,pathlib,types,sys,shutil,tempfile
 base=pathlib.Path(__file__).resolve().parents[1]/"files/usr/libexec/wifi-data-switch"
 native_path=sys.argv[1] if len(sys.argv)>1 else str(base/"native.py")
 quota_path=sys.argv[2] if len(sys.argv)>2 else str(base/"quota.py")
+sys.path.insert(0,str(pathlib.Path(native_path).parent))
 s=importlib.util.spec_from_file_location('native',native_path);native=importlib.util.module_from_spec(s);s.loader.exec_module(native)
 prefix='wd'+str(os.getpid());names={k:prefix+k for k in 'rcwm'};created=[];procs=[];tempfiles=[];core_directory=None
 def run(*args,ns=None,input=None):
@@ -130,6 +131,51 @@ try:
    rows=json.loads(run('python3','-c',socks,str(port),ns='r'))
    assert set(rows)==({'w','m'} if port==443 else {'w'}),(port,rows)
    print('Real Mihomo UDP path',port,rows,flush=True)
+ # Test the production admission path separately from legacy balancing above.
+ admission_path=str(pathlib.Path(native_path).with_name('admission.py'))
+ s=importlib.util.spec_from_file_location('admission',admission_path);admission=importlib.util.module_from_spec(s);s.loader.exec_module(admission)
+ run('conntrack','-F',ns='r')
+ run('nft','-f','-',ns='r',input=admission.native_set('fw4'))
+ smart={'boost_scope':'all_tcp','_smart_admission':True,'_mobile_share':50,'boost_quic':True}
+ run('nft','-f','-',ns='r',input=native.rules(smart,'lan',True,'fw4','wds_balance','wds_quota_guard','wds_selected',('ip daddr != @china_ip_route','ip daddr @china_ip_route_pass')))
+ run('nft','flush','set','inet','fw4','china_ip_route_pass',ns='r')
+ sequential=[run('curl','--noproxy','*','--max-time','3','-sS','http://203.0.113.1:18080/',ns='c') for _ in range(8)]
+ assert sequential==['w']*8,sequential
+ print('Smart native: eight sequential downloads all prefer Wi-Fi',sequential,flush=True)
+ concurrent="import http.client,json\ncs=[];rows=[]\nfor i in range(10):\n c=http.client.HTTPConnection('203.0.113.1',18080,timeout=3);cs.append(c);c.request('GET','/');rows.append(c.getresponse().read().decode())\nassert rows[:2]==['w','w'],rows\nassert set(rows[2:])=={'w','m'},rows\nfor c,v in zip(cs,rows):\n c.request('GET','/');assert c.getresponse().read().decode()==v\nprint(json.dumps(rows))\nfor c in cs:c.close()"
+ rows=json.loads(run('python3','-c',concurrent,ns='c'))
+ print('Smart native: first two Wi-Fi; concurrent extras use both; sockets remain pinned',rows,flush=True)
+ run('ip','addr','add','10.255.0.3/24','dev','eth0',ns='c')
+ independent=concurrent.replace("for i in range(10):", "for i in range(6):").replace("cs.append(c);c.request", "c.source_address=('10.255.0.2',0);cs.append(c);c.request").replace("print(json.dumps(rows))", "d=http.client.HTTPConnection('203.0.113.1',18080,timeout=3,source_address=('10.255.0.3',0));d.request('GET','/');assert d.getresponse().read()==b'w';d.close();print(json.dumps(rows))")
+ run('python3','-c',independent,ns='c')
+ print('Smart native: another client still starts on Wi-Fi',flush=True)
+ udp_parallel="import socket,json\ncs=[];rows=[]\nfor i in range(8):\n c=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);c.settimeout(3);cs.append(c);c.sendto(b'test',('203.0.113.1',443));rows.append(c.recv(32).decode())\nassert rows[:2]==['w','w'],rows\nassert set(rows[2:])=={'w','m'},rows\nfor c,v in zip(cs,rows):\n c.sendto(b'reuse',('203.0.113.1',443));assert c.recv(32).decode()==v\nprint(json.dumps(rows))"
+ rows=json.loads(run('python3','-c',udp_parallel,ns='c'))
+ print('Smart native UDP 443: first two Wi-Fi; concurrent sessions share; reuse is stable',rows,flush=True)
+ if core_directory:
+  procs[-1].terminate();procs[-1].wait(timeout=3)
+  run('conntrack','-F',ns='r')
+  for mark in ['0x5756','0x5757']:run('ip','rule','add','priority','100','fwmark',mark,'lookup','202',ns='r')
+  run('nft','-f','-',ns='r',input=admission.local_script())
+  ruby=ruby.replace("'active'=>true", "'active'=>true,'smart'=>true").replace("g['url']='http://203.0.113.1:18080'", "g['url']='http://203.0.113.1:18081'")
+  run('ruby','-e',ruby,str(pathlib.Path(native_path).with_name('boost.rb')),str(config))
+  with logpath.open('w') as log:
+   procs.append(subprocess.Popen(['ip','netns','exec',names['r'],'env','SAFE_PATHS=/tmp:/etc/ssl',str(binary),'-d',core_directory.name,'-f',str(config)],stdout=log,stderr=log))
+  for attempt in range(40):
+   try:run('curl','--noproxy','*','--max-time','1','-sS','http://127.0.0.1:17942/version',ns='r');break
+   except RuntimeError:time.sleep(.2)
+  else:raise RuntimeError('Smart core startup timed out: '+logpath.read_text()[-2400:])
+  run('curl','--noproxy','*','--max-time','3','-sS','-X','PUT','-H','Content-Type: application/json','-d',json.dumps({'name':'WDS-BOOST-MOBILE'}),'http://127.0.0.1:17942/proxies/WDS-BOOST-POOL',ns='r')
+  sequential=[run('curl','--proxy','http://127.0.0.1:17941','--noproxy','','--max-time','3','-sS','http://203.0.113.1:18080/',ns='r') for _ in range(8)]
+  assert sequential==['w']*8,sequential
+  print('Smart real Mihomo: even MOBILE suggestions keep single connections on Wi-Fi',sequential,flush=True)
+  run('conntrack','-F',ns='r')
+  core_concurrent=concurrent.replace("http.client.HTTPConnection('203.0.113.1',18080,timeout=3)","http.client.HTTPConnection('127.0.0.1',17941,timeout=3)").replace("cs.append(c);", "c.set_tunnel('203.0.113.1',18080);cs.append(c);").replace("assert set(rows[2:])=={'w','m'},rows", "assert rows[2:]==['m']*8,rows")
+  rows=json.loads(run('python3','-c',core_concurrent,ns='r'))
+  print('Smart real Mihomo: first two Wi-Fi, concurrent extras mobile, stable reused sockets',rows,flush=True)
+  smart_socks=socks.replace('rows=[]','rows=[];keep=[]').replace('u.close();t.close()','keep.append((u,t))').replace('print(json.dumps(rows))',"assert rows[:2]==['w','w'],rows\nassert rows[2:]==['m']*6,rows\nprint(json.dumps(rows))")
+  rows=json.loads(run('python3','-c',smart_socks,'443',ns='r'))
+  print('Smart real Mihomo UDP 443: first two Wi-Fi; concurrent extras follow selection',rows,flush=True)
  print('Independent native forwarding test passed without OpenClash',flush=True)
 finally:
  for p in procs:p.terminate()

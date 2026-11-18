@@ -69,3 +69,12 @@ scope=cfg['sub-rules']['WDS-BOOST-SCOPE']
 check(cfg['rules'][0]==original['rules'][0])
 check(scope.index('DOMAIN-SUFFIX,bilivideo.com,DIRECT')<scope.index('MATCH,WDS-BOOST-POOL'))
 puts 'Preferred DIRECT video domains preserve unrelated proxy rules'
+
+cfg=Marshal.load(Marshal.dump(original))
+WifiDataBoost.apply(cfg,runtime.merge('scope'=>'all_tcp','smart'=>true),{})
+adapters=cfg['proxies'].select { |p| [WifiDataBoost::PREFIX+'WIFI',WifiDataBoost::PREFIX+'MOBILE'].include?(p['name']) }
+check(adapters.map { |p| p['routing-mark'] }==[22358,22359])
+check(adapters.none? { |p| p.key?('interface-name') })
+check(cfg['proxies'].first==original['proxies'].first)
+WifiDataBoost.restore(cfg);check(cfg['rules']==original['rules'])
+puts 'Smart DIRECT adapters use only dedicated routing hints; original proxies preserved'
